@@ -30,8 +30,10 @@ docs/
   app.js
   style.css
   assumptions.json
+  maintenance-events.json
 inputs/
   assumptions.json
+  maintenance-events.json
 knowledge/
   README.md
   maintenance.md
@@ -50,13 +52,15 @@ v1.1 は厳密なローン償却表ではなく、一次判断用の簡易モデ
 
 年合計にはローン、維持費、修理期待値、車検だけを含めます。下取り額や最終車両価値は支出から控除せず、車両価値と純資産として別に表示します。
 
+高額イベント費用は `maintenance-events.json` で車検・通常整備とは別に管理します。タイヤ、補機バッテリー、エアコン、足回り、HVバッテリー、Welcab大型修理などを車齢ベースで発生させ、年合計へイベント費用として加算します。
+
 利用期間の最終年には、その時点の車両価値を最終売却額として別指標にします。今日の意思決定では、短期月額だけでなく25年支出合計と売却後実質コストを重視します。
 
 5年サイクルは車検・修理は少ない一方で、買替回数とローン期間が多くなります。10〜15年サイクルは車検・修理は増えますが、買替回数が少なくなります。
 
 `現車を最後まで維持・最終売却` は、評価期間中に買替を行わず、最後に売却して車利用を終了するシナリオです。47歳から約25年の車利用期間全体を見るうえで、買替なしの上限ケースとして使います。`現車を20年維持・最後に1回買替` は20年目に買替を発生させる別シナリオです。
 
-主な前提値は `docs/assumptions.json` と `inputs/assumptions.json` に集約しています。両ファイルは同じ内容です。残価・価値低下の係数も `depreciation` としてJSONに置いています。
+主な前提値は `docs/assumptions.json` と `inputs/assumptions.json` に集約しています。高額イベントは `docs/maintenance-events.json` と `inputs/maintenance-events.json` に置きます。各ファイルの `docs/` と `inputs/` は同じ内容です。残価・価値低下の係数も `depreciation` としてJSONに置いています。
 
 ## 根拠メモ
 
