@@ -299,14 +299,14 @@ function buildReplacementYears(scenario, horizonYears) {
   if (scenario.keepOnly === true || scenario.initialKeepYears === null) return years;
 
   const firstReplacement = getPreInspectionReplacementInterval(scenario.initialKeepYears);
-  if (!Number.isFinite(firstReplacement) || firstReplacement < 0 || firstReplacement >= horizonYears) return years;
+  if (!Number.isFinite(firstReplacement) || firstReplacement < 0 || firstReplacement >= horizonYears - 1) return years;
 
   years.push(firstReplacement);
   const replacementInterval = getPreInspectionReplacementInterval(scenario.cycleYears);
   if (!Number.isFinite(replacementInterval) || replacementInterval <= 0) return years;
 
   let nextReplacement = firstReplacement + replacementInterval;
-  while (nextReplacement < horizonYears) {
+  while (nextReplacement < horizonYears - 1) {
     years.push(nextReplacement);
     nextReplacement += replacementInterval;
   }
