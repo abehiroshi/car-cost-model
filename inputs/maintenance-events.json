@@ -1,0 +1,52 @@
+{
+  "events": [
+    {
+      "id": "tires",
+      "name": "タイヤ交換",
+      "amount": 120000,
+      "startVehicleAge": 8,
+      "repeatEveryYears": 8,
+      "probability": 1
+    },
+    {
+      "id": "aux_battery",
+      "name": "補機バッテリー",
+      "amount": 50000,
+      "startVehicleAge": 7,
+      "repeatEveryYears": 7,
+      "probability": 1
+    },
+    {
+      "id": "air_conditioner",
+      "name": "エアコン修理",
+      "amount": 150000,
+      "startVehicleAge": 15,
+      "repeatEveryYears": null,
+      "probability": 1
+    },
+    {
+      "id": "suspension",
+      "name": "足回り修理",
+      "amount": 150000,
+      "startVehicleAge": 15,
+      "repeatEveryYears": null,
+      "probability": 1
+    },
+    {
+      "id": "hv_battery",
+      "name": "HVバッテリー",
+      "amount": 300000,
+      "startVehicleAge": 18,
+      "repeatEveryYears": null,
+      "probability": 0.3
+    },
+    {
+      "id": "welcab_major",
+      "name": "Welcab大型修理",
+      "amount": 200000,
+      "startVehicleAge": 15,
+      "repeatEveryYears": null,
+      "probability": 0.3
+    }
+  ]
+}

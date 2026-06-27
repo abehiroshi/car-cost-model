@@ -104,8 +104,20 @@ const DEFAULT_ASSUMPTIONS = {
   ]
 };
 
+const DEFAULT_MAINTENANCE_EVENTS = {
+  events: [
+    { id: "tires", name: "タイヤ交換", amount: 120000, startVehicleAge: 8, repeatEveryYears: 8, probability: 1 },
+    { id: "aux_battery", name: "補機バッテリー", amount: 50000, startVehicleAge: 7, repeatEveryYears: 7, probability: 1 },
+    { id: "air_conditioner", name: "エアコン修理", amount: 150000, startVehicleAge: 15, repeatEveryYears: null, probability: 1 },
+    { id: "suspension", name: "足回り修理", amount: 150000, startVehicleAge: 15, repeatEveryYears: null, probability: 1 },
+    { id: "hv_battery", name: "HVバッテリー", amount: 300000, startVehicleAge: 18, repeatEveryYears: null, probability: 0.3 },
+    { id: "welcab_major", name: "Welcab大型修理", amount: 200000, startVehicleAge: 15, repeatEveryYears: null, probability: 0.3 }
+  ]
+};
+
 const state = {
   assumptions: structuredClone(DEFAULT_ASSUMPTIONS),
+  maintenanceEvents: structuredClone(DEFAULT_MAINTENANCE_EVENTS),
   results: [],
   selectedScenarioId: "now_cycle_5"
 };
@@ -136,10 +148,15 @@ async function loadJsonDefaults() {
   }
 
   try {
-    const response = await fetch("./assumptions.json", { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    state.assumptions = await response.json();
-    setStatus("assumptions.json を読み込み済み");
+    const [assumptionsResponse, eventsResponse] = await Promise.all([
+      fetch("./assumptions.json", { cache: "no-store" }),
+      fetch("./maintenance-events.json", { cache: "no-store" })
+    ]);
+    if (!assumptionsResponse.ok) throw new Error(`assumptions HTTP ${assumptionsResponse.status}`);
+    if (!eventsResponse.ok) throw new Error(`maintenance-events HTTP ${eventsResponse.status}`);
+    state.assumptions = await assumptionsResponse.json();
+    state.maintenanceEvents = await eventsResponse.json();
+    setStatus("assumptions.json / maintenance-events.json を読み込み済み");
   } catch (error) {
     setStatus("JSON読込失敗: 内蔵初期値で計算");
   }
@@ -186,13 +203,13 @@ function populateForm() {
 }
 
 function recalculate() {
-  state.results = state.assumptions.scenarios.map((scenario) => calculateScenario(state.assumptions, scenario));
+  state.results = state.assumptions.scenarios.map((scenario) => calculateScenario(state.assumptions, state.maintenanceEvents, scenario));
   renderDashboard();
   renderScenarioTable();
   renderCashflowTable();
 }
 
-function calculateScenario(assumptions, scenario) {
+function calculateScenario(assumptions, maintenanceEvents, scenario) {
   const rows = [];
   const horizonYears = getCycleHorizonYears(assumptions);
   const replacementYears = buildReplacementYears(scenario, horizonYears);
@@ -214,10 +231,12 @@ function calculateScenario(assumptions, scenario) {
     const inspection = needsInspection(assumptions, year, vehicleAge, hasNewVehicle)
       ? assumptions.annualCosts.inspection * inflation
       : 0;
+    const majorEvents = calculateMajorEvents(maintenanceEvents, vehicleAge, inflation);
+    const eventCost = sum(majorEvents.map((event) => event.expectedCost));
     const vehicleValue = estimateVehicleValueAtIndex(assumptions, index, hasNewVehicle, vehicleAge);
     const netAsset = estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge);
     const finalSaleAmount = index === horizonYears - 1 ? vehicleValue : 0;
-    const total = loan + running + repair + inspection;
+    const total = loan + running + repair + inspection + eventCost;
     const events = [];
     if (replacementEvent) events.push("買替");
     if (inspection > 0) events.push("車検");
@@ -233,6 +252,8 @@ function calculateScenario(assumptions, scenario) {
       running,
       repair,
       inspection,
+      majorEvents,
+      eventCost,
       vehicleValue,
       netAsset,
       finalSaleAmount,
@@ -241,6 +262,7 @@ function calculateScenario(assumptions, scenario) {
   }
 
   const totalCost = sum(rows.map((row) => row.total));
+  const eventCostTotal = sum(rows.map((row) => row.eventCost));
   const npv = sum(rows.map((row, index) => row.total / Math.pow(1 + safeRate(assumptions.discountRate), index)));
   const finalRow = rows[rows.length - 1];
   const finalSaleAmount = finalRow?.finalSaleAmount ?? 0;
@@ -255,6 +277,7 @@ function calculateScenario(assumptions, scenario) {
     endAge: assumptions.currentAge + rows.length,
     replacementCount: replacementYears.length,
     inspectionCount: rows.filter((row) => row.inspection > 0).length,
+    eventCostTotal,
     totalCost,
     averageMonthly: months > 0 ? totalCost / months : 0,
     npv,
@@ -275,19 +298,27 @@ function buildReplacementYears(scenario, horizonYears) {
   const years = [];
   if (scenario.keepOnly === true || scenario.initialKeepYears === null) return years;
 
-  const firstReplacement = Number(scenario.initialKeepYears);
+  const firstReplacement = getPreInspectionReplacementInterval(scenario.initialKeepYears);
   if (!Number.isFinite(firstReplacement) || firstReplacement < 0 || firstReplacement >= horizonYears - 1) return years;
 
   years.push(firstReplacement);
-  const cycleYears = Number(scenario.cycleYears);
-  if (!Number.isFinite(cycleYears) || cycleYears <= 0) return years;
+  const replacementInterval = getPreInspectionReplacementInterval(scenario.cycleYears);
+  if (!Number.isFinite(replacementInterval) || replacementInterval <= 0) return years;
 
-  let nextReplacement = firstReplacement + cycleYears;
+  let nextReplacement = firstReplacement + replacementInterval;
   while (nextReplacement < horizonYears - 1) {
     years.push(nextReplacement);
-    nextReplacement += cycleYears;
+    nextReplacement += replacementInterval;
   }
   return years;
+}
+
+function getPreInspectionReplacementInterval(cycleYears) {
+  if (cycleYears === null) return NaN;
+  const years = Number(cycleYears);
+  if (!Number.isFinite(years)) return NaN;
+  if (years <= 0) return 0;
+  return Math.max(1, years % 2 === 0 ? years - 2 : years - 1);
 }
 
 function calculateLoanCost(assumptions, year, index, activeReplacementIndex) {
@@ -320,6 +351,29 @@ function calculateRepairCost(assumptions, vehicleAge, inflation) {
   else if (vehicleAge <= 10) base = repair.years6to10;
   else if (vehicleAge <= 15) base = repair.years11to15;
   return (base + assumptions.annualCosts.welcabExtraRepair) * inflation;
+}
+
+function calculateMajorEvents(maintenanceEvents, vehicleAge, inflation) {
+  return (maintenanceEvents.events || [])
+    .filter((event) => matchesMaintenanceEvent(event, vehicleAge))
+    .map((event) => {
+      const probability = Number.isFinite(Number(event.probability)) ? Number(event.probability) : 1;
+      const expectedCost = Number(event.amount || 0) * probability * inflation;
+      return {
+        ...event,
+        probability,
+        expectedCost
+      };
+    });
+}
+
+function matchesMaintenanceEvent(event, vehicleAge) {
+  const startAge = Number(event.startVehicleAge);
+  if (!Number.isFinite(startAge) || vehicleAge < startAge) return false;
+
+  const interval = Number(event.repeatEveryYears);
+  if (!Number.isFinite(interval) || interval <= 0) return vehicleAge === startAge;
+  return (vehicleAge - startAge) % interval === 0;
 }
 
 function needsInspection(assumptions, year, vehicleAge, hasNewVehicle) {
@@ -406,6 +460,7 @@ function renderDashboard() {
   document.querySelector("#decisionText").textContent = "売却後実質コスト重視";
   document.querySelector("#decisionDetail").textContent = `最安平均との差は最大で月 ${formatYen(diff)}`;
   decisionCard.classList.add("is-good");
+  renderUpcomingEvents();
 }
 
 function renderScenarioTable() {
@@ -418,6 +473,7 @@ function renderScenarioTable() {
       <td>${numberFormatter.format(result.endAge)}歳</td>
       <td>${numberFormatter.format(result.replacementCount)}回</td>
       <td>${numberFormatter.format(result.inspectionCount)}回</td>
+      <td>${formatYen(result.eventCostTotal)}</td>
       <td>${formatYen(result.totalCost)}</td>
       <td>${formatYen(result.averageMonthly)}</td>
       <td>${formatYen(result.finalVehicleValue)}</td>
@@ -432,6 +488,7 @@ function renderScenarioTable() {
       state.selectedScenarioId = result.scenario.id;
       renderScenarioTable();
       renderCashflowTable();
+      renderUpcomingEvents();
     });
     scenarioTableBody.appendChild(row);
   }
@@ -454,12 +511,38 @@ function renderCashflowTable() {
       <td>${formatYen(item.running)}</td>
       <td>${formatYen(item.repair)}</td>
       <td>${formatYen(item.inspection)}</td>
+      <td>${escapeHtml(formatMajorEventNames(item.majorEvents))}</td>
+      <td>${formatYen(item.eventCost)}</td>
       <td>${formatYen(item.vehicleValue)}</td>
       <td>${formatYen(item.netAsset)}</td>
       <td>${formatYen(item.finalSaleAmount)}</td>
       <td>${formatYen(item.total)}</td>
     `;
     cashflowTableBody.appendChild(row);
+  }
+}
+
+function renderUpcomingEvents() {
+  const selected = state.results.find((result) => result.scenario.id === state.selectedScenarioId) || state.results[0];
+  const list = document.querySelector("#upcomingEventsList");
+  document.querySelector("#upcomingEventsScenario").textContent = selected.scenario.name;
+  list.innerHTML = "";
+
+  const upcoming = selected.rows
+    .flatMap((row) => row.majorEvents.map((event) => ({ row, event })))
+    .slice(0, 5);
+
+  if (upcoming.length === 0) {
+    const item = document.createElement("li");
+    item.textContent = "期間内の高額イベントはありません";
+    list.appendChild(item);
+    return;
+  }
+
+  for (const { row, event } of upcoming) {
+    const item = document.createElement("li");
+    item.textContent = `${row.year}年 / 車齢${row.vehicleAge}年 / ${event.name}: ${formatYen(event.expectedCost)}`;
+    list.appendChild(item);
   }
 }
 
@@ -486,6 +569,7 @@ function buildComparisonCsv(results) {
     "endAge",
     "replacementCount",
     "inspectionCount",
+    "eventCostTotal",
     "totalCost",
     "averageMonthly",
     "finalVehicleValue",
@@ -503,6 +587,7 @@ function buildComparisonCsv(results) {
       result.endAge,
       result.replacementCount,
       result.inspectionCount,
+      Math.round(result.eventCostTotal),
       Math.round(result.totalCost),
       Math.round(result.averageMonthly),
       Math.round(result.finalVehicleValue),
@@ -520,6 +605,11 @@ function buildComparisonCsv(results) {
 function csvCell(value) {
   const stringValue = String(value);
   return /[",\n]/.test(stringValue) ? `"${stringValue.replaceAll('"', '""')}"` : stringValue;
+}
+
+function formatMajorEventNames(events) {
+  if (!events.length) return "-";
+  return events.map((event) => event.name).join(" / ");
 }
 
 function downloadFile(filename, content, type) {
