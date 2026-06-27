@@ -23,15 +23,15 @@ const DEFAULT_ASSUMPTIONS = {
   newVehicle: {
     estimateTotal: 4276000,
     tradeIn: 3014000,
-    loanMonthly: 37064,
-    bonusPerPayment: 35900,
-    bonusPaymentsPerYear: 2,
+    loanMonthly: 43047.333333333336,
+    bonusPerPayment: 0,
+    bonusPaymentsPerYear: 0,
     loanYears: 5,
     loanFinal: 1599000,
     interestRate: 0.061
   },
   annualCosts: {
-    autoTax: 45000,
+    autoTax: 0,
     insurance: 80000,
     fuel: 30000,
     maintenance: 30000,
@@ -256,6 +256,7 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
     const netAsset = estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge);
     const finalSaleAmount = index === horizonYears - 1 ? vehicleValue : 0;
     const total = loan + running + repair + inspection + eventCost;
+    const loanMonthlyEquivalent = loan / 12;
     const annualMonthly = total / 12;
     cumulativeCost += total;
     const cumulativeAverageMonthly = cumulativeCost / ((index + 1) * 12);
@@ -271,6 +272,7 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
       vehicleLabel,
       event: events.join(" / ") || "-",
       loan,
+      loanMonthlyEquivalent,
       running,
       repair,
       inspection,
@@ -528,6 +530,7 @@ function renderCostRules() {
   const next = assumptions.newVehicle;
   const annual = assumptions.annualCosts;
   const repair = assumptions.repairExpected;
+  const newLoanTotalRepayment = calculateNewLoanTotalRepayment(next);
 
   costRulesContent.innerHTML = `
     <div class="rule-grid">
@@ -554,13 +557,15 @@ function renderCostRules() {
         ["下取り額", formatYen(next.tradeIn)],
         ["新ローン月額", formatYen(next.loanMonthly)],
         ["ボーナス払い", formatYen(next.bonusPerPayment)],
-        ["ボーナス回数", `年${numberFormatter.format(next.bonusPaymentsPerYear)}回`],
+        ["ボーナス回数", `${numberFormatter.format(next.bonusPaymentsPerYear)}回`],
+        ["月額の扱い", "ボーナス払い分を均等化した月額"],
         ["ローン年数", `${numberFormatter.format(next.loanYears)}年`],
         ["最終回", formatYen(next.loanFinal)],
+        ["総返済額", formatYen(newLoanTotalRepayment)],
         ["金利", formatPercent(next.interestRate)]
       ])}
       ${renderRuleGroup("年間維持費", [
-        ["自動車税", formatYen(annual.autoTax)],
+        ["自動車税", `${formatYen(annual.autoTax)}（障害者減免を反映）`],
         ["任意保険", formatYen(annual.insurance)],
         ["燃料", formatYen(annual.fuel)],
         ["通常メンテ", formatYen(annual.maintenance)],
@@ -613,12 +618,21 @@ function renderCostRules() {
         ["除外するもの", "最終売却額は年合計に含めない"]
       ])}
       ${renderRuleGroup("月額の式", [
+        ["ローン月額換算", "ローン年額 / 12"],
         ["その年の必要月額", "年合計 / 12"],
         ["累計平均月額", "累計支出 / 経過月数"],
         ["売却後平均月額", "(支出合計 - 最終売却額) / 利用月数"]
       ])}
     </div>
   `;
+}
+
+function calculateNewLoanTotalRepayment(newVehicle) {
+  return (
+    newVehicle.loanMonthly * newVehicle.loanYears * 12
+    + newVehicle.bonusPerPayment * newVehicle.bonusPaymentsPerYear * newVehicle.loanYears
+    + newVehicle.loanFinal
+  );
 }
 
 function renderRuleGroup(title, rows) {
@@ -698,6 +712,7 @@ function renderCashflowTable() {
       <td>${escapeHtml(item.vehicleLabel)}</td>
       <td>${escapeHtml(item.event)}</td>
       <td>${formatYen(item.loan)}</td>
+      <td>${formatYen(item.loanMonthlyEquivalent)}</td>
       <td>${formatYen(item.running)}</td>
       <td>${formatYen(item.repair)}</td>
       <td>${formatYen(item.inspection)}</td>
@@ -843,6 +858,7 @@ function buildCashflowCsv(result) {
     "vehicleLabel",
     "event",
     "loan",
+    "loanMonthlyEquivalent",
     "running",
     "repair",
     "inspection",
@@ -866,6 +882,7 @@ function buildCashflowCsv(result) {
       item.vehicleLabel,
       item.event,
       Math.round(item.loan),
+      Math.round(item.loanMonthlyEquivalent),
       Math.round(item.running),
       Math.round(item.repair),
       Math.round(item.inspection),

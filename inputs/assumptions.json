@@ -21,15 +21,15 @@
   "newVehicle": {
     "estimateTotal": 4276000,
     "tradeIn": 3014000,
-    "loanMonthly": 37064,
-    "bonusPerPayment": 35900,
-    "bonusPaymentsPerYear": 2,
+    "loanMonthly": 43047.333333333336,
+    "bonusPerPayment": 0,
+    "bonusPaymentsPerYear": 0,
     "loanYears": 5,
     "loanFinal": 1599000,
     "interestRate": 0.061
   },
   "annualCosts": {
-    "autoTax": 45000,
+    "autoTax": 0,
     "insurance": 80000,
     "fuel": 30000,
     "maintenance": 30000,
