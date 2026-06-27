@@ -123,6 +123,8 @@ const state = {
 
 const form = document.querySelector("#assumptionForm");
 const scenarioTableBody = document.querySelector("#scenarioTableBody");
+const annualScenarioComparisonTableHead = document.querySelector("#annualScenarioComparisonTableHead");
+const annualScenarioComparisonTableBody = document.querySelector("#annualScenarioComparisonTableBody");
 const cashflowTableBody = document.querySelector("#cashflowTableBody");
 const yenFormatter = new Intl.NumberFormat("ja-JP", {
   style: "currency",
@@ -191,6 +193,19 @@ function bindEvents() {
       downloadFile("car-cost-scenarios.csv", buildComparisonCsv(state.results), "text/csv;charset=utf-8");
     }
   });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action='download-cashflow-csv']");
+    if (!button) return;
+    const selected = getSelectedResult();
+    downloadFile(`car-cost-cashflow-${selected.scenario.id}.csv`, buildCashflowCsv(selected), "text/csv;charset=utf-8");
+  });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action='download-annual-comparison-csv']");
+    if (!button) return;
+    downloadFile("car-cost-annual-scenario-comparison.csv", buildAnnualScenarioComparisonCsv(state.results), "text/csv;charset=utf-8");
+  });
 }
 
 function populateForm() {
@@ -205,6 +220,7 @@ function recalculate() {
   state.results = state.assumptions.scenarios.map((scenario) => calculateScenario(state.assumptions, state.maintenanceEvents, scenario));
   renderDashboard();
   renderScenarioTable();
+  renderAnnualScenarioComparisonTable();
   renderCashflowTable();
 }
 
@@ -213,6 +229,7 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
   const horizonYears = getCycleHorizonYears(assumptions);
   const replacementYears = buildReplacementYears(scenario, horizonYears, assumptions);
   let activeReplacementIndex = null;
+  let cumulativeCost = 0;
 
   for (let index = 0; index < horizonYears; index += 1) {
     const year = assumptions.startYear + index;
@@ -236,6 +253,9 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
     const netAsset = estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge);
     const finalSaleAmount = index === horizonYears - 1 ? vehicleValue : 0;
     const total = loan + running + repair + inspection + eventCost;
+    const annualMonthly = total / 12;
+    cumulativeCost += total;
+    const cumulativeAverageMonthly = cumulativeCost / ((index + 1) * 12);
     const events = [];
     if (replacementEvent) events.push("買替");
     if (inspection > 0) events.push("車検");
@@ -256,7 +276,10 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
       vehicleValue,
       netAsset,
       finalSaleAmount,
-      total
+      total,
+      annualMonthly,
+      cumulativeCost,
+      cumulativeAverageMonthly
     });
   }
 
@@ -496,8 +519,31 @@ function renderScenarioTable() {
   }
 }
 
+function renderAnnualScenarioComparisonTable() {
+  annualScenarioComparisonTableHead.innerHTML = `
+    <tr>
+      <th>年</th>
+      ${state.results.map((result) => `<th>${escapeHtml(result.scenario.name)}</th>`).join("")}
+    </tr>
+  `;
+  annualScenarioComparisonTableBody.innerHTML = "";
+
+  for (const comparisonRow of buildAnnualScenarioComparisonRows(state.results)) {
+    const row = document.createElement("tr");
+    const cells = comparisonRow.values.map((value) => {
+      if (!value) return "<td>-</td>";
+      return `<td title="年合計 ${escapeHtml(formatYen(value.total))}">${formatYenPerMonth(value.annualMonthly)}</td>`;
+    });
+    row.innerHTML = `
+      <td>${comparisonRow.year}</td>
+      ${cells.join("")}
+    `;
+    annualScenarioComparisonTableBody.appendChild(row);
+  }
+}
+
 function renderCashflowTable() {
-  const selected = state.results.find((result) => result.scenario.id === state.selectedScenarioId) || state.results[0];
+  const selected = getSelectedResult();
   document.querySelector("#cashflowScenarioName").textContent = selected.scenario.name;
   cashflowTableBody.innerHTML = "";
 
@@ -519,6 +565,9 @@ function renderCashflowTable() {
       <td>${formatYen(item.netAsset)}</td>
       <td>${formatYen(item.finalSaleAmount)}</td>
       <td>${formatYen(item.total)}</td>
+      <td>${formatYen(item.annualMonthly)}</td>
+      <td>${formatYen(item.cumulativeCost)}</td>
+      <td>${formatYen(item.cumulativeAverageMonthly)}</td>
     `;
     cashflowTableBody.appendChild(row);
   }
@@ -604,6 +653,98 @@ function buildComparisonCsv(results) {
   return `\uFEFF${lines.join("\n")}`;
 }
 
+function buildAnnualScenarioComparisonRows(results) {
+  const rowCount = Math.max(0, ...results.map((result) => result.rows.length));
+  const rows = [];
+  for (let index = 0; index < rowCount; index += 1) {
+    const baseRow = results.find((result) => result.rows[index])?.rows[index];
+    rows.push({
+      year: baseRow?.year ?? "-",
+      values: results.map((result) => {
+        const row = result.rows[index];
+        if (!row) return null;
+        return {
+          total: row.total,
+          annualMonthly: row.total / 12
+        };
+      })
+    });
+  }
+  return rows;
+}
+
+function buildAnnualScenarioComparisonCsv(results) {
+  const headers = [
+    "year",
+    ...results.flatMap((result) => [
+      `${result.scenario.name} annualMonthly`,
+      `${result.scenario.name} total`
+    ])
+  ];
+  const lines = [headers.map(csvCell).join(",")];
+  for (const row of buildAnnualScenarioComparisonRows(results)) {
+    const values = [row.year];
+    for (const value of row.values) {
+      values.push(value ? Math.round(value.annualMonthly) : "-", value ? Math.round(value.total) : "-");
+    }
+    lines.push(values.map(csvCell).join(","));
+  }
+  return `\uFEFF${lines.join("\n")}`;
+}
+
+function buildCashflowCsv(result) {
+  const headers = [
+    "scenario",
+    "year",
+    "driverAge",
+    "vehicleAge",
+    "vehicleLabel",
+    "event",
+    "loan",
+    "running",
+    "repair",
+    "inspection",
+    "majorEvents",
+    "eventCost",
+    "vehicleValue",
+    "netAsset",
+    "finalSaleAmount",
+    "total",
+    "annualMonthly",
+    "cumulativeCost",
+    "cumulativeAverageMonthly"
+  ];
+  const lines = [headers.join(",")];
+  for (const item of result.rows) {
+    lines.push([
+      result.scenario.name,
+      item.year,
+      item.driverAge,
+      item.vehicleAge,
+      item.vehicleLabel,
+      item.event,
+      Math.round(item.loan),
+      Math.round(item.running),
+      Math.round(item.repair),
+      Math.round(item.inspection),
+      formatMajorEventNames(item.majorEvents),
+      Math.round(item.eventCost),
+      Math.round(item.vehicleValue),
+      Math.round(item.netAsset),
+      Math.round(item.finalSaleAmount),
+      Math.round(item.total),
+      Math.round(item.annualMonthly),
+      Math.round(item.cumulativeCost),
+      Math.round(item.cumulativeAverageMonthly)
+    ].map(csvCell).join(","));
+  }
+  return `\uFEFF${lines.join("\n")}`;
+}
+
+function getSelectedResult() {
+  return state.results.find((result) => result.scenario.id === state.selectedScenarioId) || state.results[0];
+}
+
 function csvCell(value) {
   const stringValue = String(value);
   return /[",\n]/.test(stringValue) ? `"${stringValue.replaceAll('"', '""')}"` : stringValue;
@@ -653,6 +794,10 @@ function safeRate(value) {
 
 function formatYen(value) {
   return yenFormatter.format(Math.round(value || 0));
+}
+
+function formatYenPerMonth(value) {
+  return `${formatYen(value)} /月`;
 }
 
 function setStatus(message) {
