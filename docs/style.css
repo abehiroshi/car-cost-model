@@ -247,6 +247,98 @@ tbody tr.is-selected {
   margin-top: 24px;
 }
 
+.rule-panel {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.rule-panel summary {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 16px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.rule-panel summary small {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 500;
+}
+
+.rule-panel-body {
+  display: grid;
+  gap: 18px;
+  border-top: 1px solid var(--line);
+  padding: 16px;
+}
+
+.rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.rule-grid-narrow {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rule-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.rule-block h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.rule-block p {
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.rule-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.rule-list div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.95fr) minmax(0, 1.4fr);
+  gap: 10px;
+}
+
+.rule-list dt {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.rule-list dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.compact-table-wrap table,
+.rules-table {
+  min-width: 900px;
+}
+
+.rules-table tbody tr {
+  cursor: default;
+}
+
+.rules-table tbody tr:hover {
+  background: transparent;
+}
+
 .upcoming-events {
   margin-top: 18px;
   border-top: 1px solid var(--line);
@@ -274,6 +366,11 @@ tbody tr.is-selected {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .rule-grid,
+  .rule-grid-narrow {
+    grid-template-columns: 1fr;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -297,5 +394,15 @@ tbody tr.is-selected {
   .metric-grid,
   fieldset {
     grid-template-columns: 1fr;
+  }
+
+  .rule-panel summary,
+  .rule-list div {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-panel summary {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
