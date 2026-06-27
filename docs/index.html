@@ -13,9 +13,9 @@
         <h1>ノア Welcab 買い替え判断</h1>
       </div>
       <div class="header-actions">
-        <button type="button" id="copyJsonButton">JSONコピー</button>
-        <button type="button" id="downloadJsonButton">JSON保存</button>
-        <button type="button" id="downloadCsvButton">CSV保存</button>
+        <button type="button" id="copyJsonButton" data-action="copy-json">JSONコピー</button>
+        <button type="button" id="downloadJsonButton" data-action="download-json">JSON保存</button>
+        <button type="button" id="downloadCsvButton" data-action="download-csv">CSV保存</button>
       </div>
     </header>
 
@@ -34,17 +34,37 @@
           <article class="metric-card">
             <span>最安シナリオ</span>
             <strong id="cheapestScenario">-</strong>
-            <small id="cheapestAmount">-</small>
+            <small id="cheapestAmount">売却後平均月額</small>
           </article>
           <article class="metric-card">
-            <span>今買替 7年平均月額</span>
-            <strong id="replaceNowMonthly">-</strong>
-            <small>初回7年の現金支出ベース</small>
+            <span>25年支出合計</span>
+            <strong id="totalCost25">-</strong>
+            <small>車両価値は控除しない</small>
           </article>
           <article class="metric-card">
-            <span>維持系 最小7年平均月額</span>
-            <strong id="keepMonthly">-</strong>
-            <small>買替を遅らせる候補の最小値</small>
+            <span>売却後実質コスト</span>
+            <strong id="netCostAfterSale">-</strong>
+            <small>支出合計 - 最終売却額</small>
+          </article>
+          <article class="metric-card">
+            <span>25年平均月額</span>
+            <strong id="averageMonthly25">-</strong>
+            <small>利用期間全体の支出平均</small>
+          </article>
+          <article class="metric-card">
+            <span>売却後平均月額</span>
+            <strong id="averageMonthlyAfterSale">-</strong>
+            <small>最終売却額控除後</small>
+          </article>
+          <article class="metric-card">
+            <span>買替回数</span>
+            <strong id="replacementCount">-</strong>
+            <small>期間内の買替回数</small>
+          </article>
+          <article class="metric-card">
+            <span>車検回数</span>
+            <strong id="inspectionCount">-</strong>
+            <small>期間内の車検回数</small>
           </article>
         </div>
       </section>
@@ -63,12 +83,20 @@
               <input name="startYear" type="number" step="1">
             </label>
             <label>
-              評価年数
-              <input name="horizonYears" type="number" step="1" min="1">
-            </label>
-            <label>
               年間走行距離 km
               <input name="annualKm" type="number" step="100" min="0">
+            </label>
+            <label>
+              現在年齢
+              <input name="currentAge" type="number" step="1" min="0">
+            </label>
+            <label>
+              残り利用年数
+              <input name="drivingYearsRemaining" type="number" step="1" min="1">
+            </label>
+            <label>
+              サイクル評価年数
+              <input name="cycleHorizonYears" type="number" step="1" min="1">
             </label>
             <label>
               物価上昇率
@@ -219,13 +247,18 @@
               <thead>
                 <tr>
                   <th>シナリオ</th>
-                  <th>7年平均月額</th>
-                  <th>20年平均月額</th>
-                  <th>20年NPV</th>
-                  <th>20年支出合計</th>
-                  <th>20年末車両価値</th>
+                  <th>利用終了年齢</th>
+                  <th>買替回数</th>
+                  <th>車検回数</th>
+                  <th>25年支出合計</th>
+                  <th>25年平均月額</th>
+                  <th>最終車両価値</th>
+                  <th>最終売却額</th>
+                  <th>売却後実質コスト</th>
+                  <th>売却後平均月額</th>
+                  <th>25年NPV</th>
                   <th>1km単価</th>
-                  <th>2032年純資産</th>
+                  <th>25年末純資産</th>
                 </tr>
               </thead>
               <tbody id="scenarioTableBody"></tbody>
@@ -241,13 +274,17 @@
               <thead>
                 <tr>
                   <th>年</th>
+                  <th>年齢</th>
                   <th>車齢</th>
+                  <th>車両</th>
+                  <th>イベント</th>
                   <th>ローン</th>
                   <th>維持費</th>
                   <th>修理期待値</th>
                   <th>車検</th>
                   <th>車両価値</th>
                   <th>純資産</th>
+                  <th>最終売却想定額</th>
                   <th>年合計</th>
                 </tr>
               </thead>

@@ -2,6 +2,9 @@
   "startYear": 2026,
   "horizonYears": 20,
   "annualKm": 2500,
+  "currentAge": 47,
+  "drivingYearsRemaining": 25,
+  "cycleHorizonYears": 25,
   "discountRate": 0.02,
   "inflationRate": 0,
   "currentVehicle": {
@@ -90,34 +93,40 @@
   },
   "scenarios": [
     {
-      "id": "replace_now",
-      "name": "今買替",
-      "replaceAfterYears": 0,
-      "keepOnly": false
+      "id": "now_cycle_5",
+      "name": "今買替・5年サイクル",
+      "initialKeepYears": 0,
+      "cycleYears": 5
     },
     {
-      "id": "replace_after_2",
-      "name": "2年後買替",
-      "replaceAfterYears": 2,
-      "keepOnly": false
+      "id": "now_cycle_7",
+      "name": "今買替・7年サイクル",
+      "initialKeepYears": 0,
+      "cycleYears": 7
     },
     {
-      "id": "replace_after_4",
-      "name": "4年後買替",
-      "replaceAfterYears": 4,
-      "keepOnly": false
+      "id": "now_cycle_10",
+      "name": "今買替・10年サイクル",
+      "initialKeepYears": 0,
+      "cycleYears": 10
     },
     {
-      "id": "replace_after_6",
-      "name": "6年後買替",
-      "replaceAfterYears": 6,
-      "keepOnly": false
+      "id": "keep_5_then_10",
+      "name": "現車をあと5年維持・以後10年サイクル",
+      "initialKeepYears": 5,
+      "cycleYears": 10
     },
     {
-      "id": "keep_until_15",
-      "name": "20年維持",
-      "replaceAfterYears": null,
-      "keepOnly": true
+      "id": "keep_10_then_15",
+      "name": "現車をあと10年維持・以後15年または最後まで",
+      "initialKeepYears": 10,
+      "cycleYears": 15
+    },
+    {
+      "id": "keep_20",
+      "name": "現車を20年維持",
+      "initialKeepYears": 20,
+      "cycleYears": null
     }
   ]
 }
