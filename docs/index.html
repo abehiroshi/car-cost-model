@@ -15,7 +15,7 @@
       <div class="header-actions">
         <button type="button" id="copyJsonButton" data-action="copy-json">JSONコピー</button>
         <button type="button" id="downloadJsonButton" data-action="download-json">JSON保存</button>
-        <button type="button" id="downloadCsvButton" data-action="download-csv">CSV保存</button>
+        <button type="button" id="downloadCsvButton" data-action="download-csv">比較CSV保存</button>
       </div>
     </header>
 
@@ -274,8 +274,21 @@
           </div>
 
           <div class="section-heading cashflow-heading">
+            <h2>年別シナリオ比較</h2>
+            <p>各年の必要月額</p>
+            <button type="button" data-action="download-annual-comparison-csv">年別比較CSV保存</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead id="annualScenarioComparisonTableHead"></thead>
+              <tbody id="annualScenarioComparisonTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="section-heading cashflow-heading">
             <h2>年次キャッシュフロー</h2>
             <p id="cashflowScenarioName">-</p>
+            <button type="button" data-action="download-cashflow-csv">年次CSV保存</button>
           </div>
           <div class="table-wrap">
             <table>
@@ -296,6 +309,9 @@
                   <th>純資産</th>
                   <th>最終売却想定額</th>
                   <th>年合計</th>
+                  <th>その年の必要月額</th>
+                  <th>累計支出</th>
+                  <th>累計平均月額</th>
                 </tr>
               </thead>
               <tbody id="cashflowTableBody"></tbody>
