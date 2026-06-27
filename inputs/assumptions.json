@@ -123,10 +123,17 @@
       "cycleYears": 15
     },
     {
-      "id": "keep_20",
-      "name": "現車を20年維持",
+      "id": "keep_20_then_last_car",
+      "name": "現車を20年維持・最後に1回買替",
       "initialKeepYears": 20,
       "cycleYears": null
+    },
+    {
+      "id": "keep_current_until_exit",
+      "name": "現車を最後まで維持・最終売却",
+      "initialKeepYears": null,
+      "cycleYears": null,
+      "keepOnly": true
     }
   ]
 }

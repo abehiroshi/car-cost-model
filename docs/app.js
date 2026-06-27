@@ -99,7 +99,8 @@ const DEFAULT_ASSUMPTIONS = {
     { id: "now_cycle_10", name: "今買替・10年サイクル", initialKeepYears: 0, cycleYears: 10 },
     { id: "keep_5_then_10", name: "現車をあと5年維持・以後10年サイクル", initialKeepYears: 5, cycleYears: 10 },
     { id: "keep_10_then_15", name: "現車をあと10年維持・以後15年または最後まで", initialKeepYears: 10, cycleYears: 15 },
-    { id: "keep_20", name: "現車を20年維持", initialKeepYears: 20, cycleYears: null }
+    { id: "keep_20_then_last_car", name: "現車を20年維持・最後に1回買替", initialKeepYears: 20, cycleYears: null },
+    { id: "keep_current_until_exit", name: "現車を最後まで維持・最終売却", initialKeepYears: null, cycleYears: null, keepOnly: true }
   ]
 };
 
@@ -272,6 +273,8 @@ function getCycleHorizonYears(assumptions) {
 
 function buildReplacementYears(scenario, horizonYears) {
   const years = [];
+  if (scenario.keepOnly === true || scenario.initialKeepYears === null) return years;
+
   const firstReplacement = Number(scenario.initialKeepYears);
   if (!Number.isFinite(firstReplacement) || firstReplacement < 0 || firstReplacement >= horizonYears - 1) return years;
 
