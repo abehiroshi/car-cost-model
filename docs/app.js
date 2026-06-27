@@ -94,13 +94,12 @@ const DEFAULT_ASSUMPTIONS = {
     minimumValueRate: 0.03
   },
   scenarios: [
-    { id: "now_cycle_5", name: "今買替・5年サイクル", initialKeepYears: 0, cycleYears: 5 },
-    { id: "now_cycle_7", name: "今買替・7年サイクル", initialKeepYears: 0, cycleYears: 7 },
-    { id: "now_cycle_10", name: "今買替・10年サイクル", initialKeepYears: 0, cycleYears: 10 },
-    { id: "keep_5_then_10", name: "現車をあと5年維持・以後10年サイクル", initialKeepYears: 5, cycleYears: 10 },
-    { id: "keep_10_then_15", name: "現車をあと10年維持・以後15年または最後まで", initialKeepYears: 10, cycleYears: 15 },
-    { id: "keep_20_then_last_car", name: "現車を20年維持・最後に1回買替", initialKeepYears: 20, cycleYears: null },
-    { id: "keep_current_until_exit", name: "現車を最後まで維持・最終売却", initialKeepYears: null, cycleYears: null, keepOnly: true }
+    { id: "before_inspection_5", name: "5年目車検前", replacementBeforeInspectionYear: 5 },
+    { id: "before_inspection_7", name: "7年目車検前", replacementBeforeInspectionYear: 7 },
+    { id: "before_inspection_9", name: "9年目車検前", replacementBeforeInspectionYear: 9 },
+    { id: "before_inspection_11", name: "11年目車検前", replacementBeforeInspectionYear: 11 },
+    { id: "before_inspection_13", name: "13年目車検前", replacementBeforeInspectionYear: 13 },
+    { id: "keep_until_exit", name: "最後まで維持・最終売却", keepOnly: true }
   ]
 };
 
@@ -119,7 +118,7 @@ const state = {
   assumptions: structuredClone(DEFAULT_ASSUMPTIONS),
   maintenanceEvents: structuredClone(DEFAULT_MAINTENANCE_EVENTS),
   results: [],
-  selectedScenarioId: "now_cycle_5"
+  selectedScenarioId: "before_inspection_5"
 };
 
 const form = document.querySelector("#assumptionForm");
@@ -212,7 +211,7 @@ function recalculate() {
 function calculateScenario(assumptions, maintenanceEvents, scenario) {
   const rows = [];
   const horizonYears = getCycleHorizonYears(assumptions);
-  const replacementYears = buildReplacementYears(scenario, horizonYears);
+  const replacementYears = buildReplacementYears(scenario, horizonYears, assumptions);
   let activeReplacementIndex = null;
 
   for (let index = 0; index < horizonYears; index += 1) {
@@ -294,18 +293,16 @@ function getCycleHorizonYears(assumptions) {
   return Math.max(1, Number(assumptions.cycleHorizonYears || assumptions.drivingYearsRemaining || assumptions.horizonYears) || 25);
 }
 
-function buildReplacementYears(scenario, horizonYears) {
+function buildReplacementYears(scenario, horizonYears, assumptions) {
   const years = [];
-  if (scenario.keepOnly === true || scenario.initialKeepYears === null) return years;
+  if (scenario.keepOnly === true) return years;
 
-  const firstReplacement = getPreInspectionReplacementInterval(scenario.initialKeepYears);
-  if (!Number.isFinite(firstReplacement) || firstReplacement < 0 || firstReplacement >= horizonYears - 1) return years;
-
-  years.push(firstReplacement);
-  const replacementInterval = getPreInspectionReplacementInterval(scenario.cycleYears);
+  const replacementInterval = getReplacementBeforeInspectionInterval(scenario.replacementBeforeInspectionYear);
   if (!Number.isFinite(replacementInterval) || replacementInterval <= 0) return years;
 
-  let nextReplacement = firstReplacement + replacementInterval;
+  let nextReplacement = getCurrentVehicleFirstReplacementIndex(scenario, assumptions);
+  if (!Number.isFinite(nextReplacement) || nextReplacement >= horizonYears - 1) return years;
+
   while (nextReplacement < horizonYears - 1) {
     years.push(nextReplacement);
     nextReplacement += replacementInterval;
@@ -313,12 +310,17 @@ function buildReplacementYears(scenario, horizonYears) {
   return years;
 }
 
-function getPreInspectionReplacementInterval(cycleYears) {
-  if (cycleYears === null) return NaN;
-  const years = Number(cycleYears);
-  if (!Number.isFinite(years)) return NaN;
-  if (years <= 0) return 0;
-  return Math.max(1, years % 2 === 0 ? years - 2 : years - 1);
+function getCurrentVehicleFirstReplacementIndex(scenario, assumptions) {
+  const inspectionYear = Number(scenario.replacementBeforeInspectionYear);
+  const currentAgeAtStart = Number(assumptions.currentVehicle?.ageAtStart);
+  if (!Number.isFinite(inspectionYear) || !Number.isFinite(currentAgeAtStart)) return NaN;
+  return Math.max(0, inspectionYear - currentAgeAtStart - 1);
+}
+
+function getReplacementBeforeInspectionInterval(inspectionYear) {
+  const year = Number(inspectionYear);
+  if (!Number.isFinite(year) || year <= 1) return NaN;
+  return year - 1;
 }
 
 function calculateLoanCost(assumptions, year, index, activeReplacementIndex) {
