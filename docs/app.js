@@ -298,19 +298,27 @@ function buildReplacementYears(scenario, horizonYears) {
   const years = [];
   if (scenario.keepOnly === true || scenario.initialKeepYears === null) return years;
 
-  const firstReplacement = Number(scenario.initialKeepYears);
-  if (!Number.isFinite(firstReplacement) || firstReplacement < 0 || firstReplacement >= horizonYears - 1) return years;
+  const firstReplacement = getPreInspectionReplacementInterval(scenario.initialKeepYears);
+  if (!Number.isFinite(firstReplacement) || firstReplacement < 0 || firstReplacement >= horizonYears) return years;
 
   years.push(firstReplacement);
-  const cycleYears = Number(scenario.cycleYears);
-  if (!Number.isFinite(cycleYears) || cycleYears <= 0) return years;
+  const replacementInterval = getPreInspectionReplacementInterval(scenario.cycleYears);
+  if (!Number.isFinite(replacementInterval) || replacementInterval <= 0) return years;
 
-  let nextReplacement = firstReplacement + cycleYears;
-  while (nextReplacement < horizonYears - 1) {
+  let nextReplacement = firstReplacement + replacementInterval;
+  while (nextReplacement < horizonYears) {
     years.push(nextReplacement);
-    nextReplacement += cycleYears;
+    nextReplacement += replacementInterval;
   }
   return years;
+}
+
+function getPreInspectionReplacementInterval(cycleYears) {
+  if (cycleYears === null) return NaN;
+  const years = Number(cycleYears);
+  if (!Number.isFinite(years)) return NaN;
+  if (years <= 0) return 0;
+  return Math.max(1, years % 2 === 0 ? years - 2 : years - 1);
 }
 
 function calculateLoanCost(assumptions, year, index, activeReplacementIndex) {
