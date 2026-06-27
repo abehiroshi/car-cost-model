@@ -126,12 +126,14 @@ const scenarioTableBody = document.querySelector("#scenarioTableBody");
 const annualScenarioComparisonTableHead = document.querySelector("#annualScenarioComparisonTableHead");
 const annualScenarioComparisonTableBody = document.querySelector("#annualScenarioComparisonTableBody");
 const cashflowTableBody = document.querySelector("#cashflowTableBody");
+const costRulesContent = document.querySelector("#costRulesContent");
 const yenFormatter = new Intl.NumberFormat("ja-JP", {
   style: "currency",
   currency: "JPY",
   maximumFractionDigits: 0
 });
 const numberFormatter = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 });
+const percentFormatter = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 });
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -220,6 +222,7 @@ function recalculate() {
   state.results = state.assumptions.scenarios.map((scenario) => calculateScenario(state.assumptions, state.maintenanceEvents, scenario));
   renderDashboard();
   renderScenarioTable();
+  renderCostRules();
   renderAnnualScenarioComparisonTable();
   renderCashflowTable();
 }
@@ -519,6 +522,145 @@ function renderScenarioTable() {
   }
 }
 
+function renderCostRules() {
+  const assumptions = state.assumptions;
+  const current = assumptions.currentVehicle;
+  const next = assumptions.newVehicle;
+  const annual = assumptions.annualCosts;
+  const repair = assumptions.repairExpected;
+
+  costRulesContent.innerHTML = `
+    <div class="rule-grid">
+      ${renderRuleGroup("基本前提", [
+        ["開始年", `${numberFormatter.format(assumptions.startYear)}年`],
+        ["現在年齢", `${numberFormatter.format(assumptions.currentAge)}歳`],
+        ["利用予定年数", `${numberFormatter.format(getCycleHorizonYears(assumptions))}年`],
+        ["年間走行距離", `${numberFormatter.format(assumptions.annualKm)}km`],
+        ["割引率", formatPercent(assumptions.discountRate)],
+        ["物価上昇率", formatPercent(assumptions.inflationRate)]
+      ])}
+      ${renderRuleGroup("現在車両", [
+        ["車名", current.name],
+        ["購入年", `${numberFormatter.format(current.purchaseYear)}年`],
+        ["開始時車齢", `${numberFormatter.format(current.ageAtStart)}年`],
+        ["現在査定額", formatYen(current.appraisal)],
+        ["ローン残債", formatYen(current.loanBalance)],
+        ["月額", formatYen(current.loanMonthly)],
+        ["ローン終了年", `${numberFormatter.format(current.loanEndYear)}年`],
+        ["最終回", formatYen(current.loanFinal)]
+      ])}
+      ${renderRuleGroup("新車・買替", [
+        ["新車見積総額", formatYen(next.estimateTotal)],
+        ["下取り額", formatYen(next.tradeIn)],
+        ["新ローン月額", formatYen(next.loanMonthly)],
+        ["ボーナス払い", formatYen(next.bonusPerPayment)],
+        ["ボーナス回数", `年${numberFormatter.format(next.bonusPaymentsPerYear)}回`],
+        ["ローン年数", `${numberFormatter.format(next.loanYears)}年`],
+        ["最終回", formatYen(next.loanFinal)],
+        ["金利", formatPercent(next.interestRate)]
+      ])}
+      ${renderRuleGroup("年間維持費", [
+        ["自動車税", formatYen(annual.autoTax)],
+        ["任意保険", formatYen(annual.insurance)],
+        ["燃料", formatYen(annual.fuel)],
+        ["通常メンテ", formatYen(annual.maintenance)],
+        ["Welcab追加修理期待値", `${formatYen(annual.welcabExtraRepair)} / 年`],
+        ["車検費用", formatYen(annual.inspection)],
+        ["車検周期", `${numberFormatter.format(annual.inspectionCycleYears)}年ごと`]
+      ])}
+      ${renderRuleGroup("修理期待値", [
+        ["5年まで", `${formatYen(repair.through5Years)} / 年`],
+        ["6〜10年", `${formatYen(repair.years6to10)} / 年`],
+        ["11〜15年", `${formatYen(repair.years11to15)} / 年`],
+        ["16年以降", `${formatYen(repair.after16Years)} / 年`],
+        ["計算への組み込み", "毎年の期待値として年合計に加算"]
+      ])}
+    </div>
+
+    <section class="rule-block">
+      <h3>高額イベント</h3>
+      <p>タイヤ、補機バッテリー等は該当車齢の年にイベント費用として年合計へ加算します。確率があるイベントは 金額 × 確率 を期待値として加算します。比較対象は5/7/9/11/13/15年目車検前で、短期買替では車齢到達前に買替されるため発生しにくくなります。</p>
+      <div class="table-wrap compact-table-wrap">
+        <table class="rules-table">
+          <thead>
+            <tr>
+              <th>イベント名</th>
+              <th>発生車齢</th>
+              <th>繰り返し周期</th>
+              <th>金額</th>
+              <th>確率</th>
+              <th>期待値</th>
+              <th>年合計に入るか</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderMaintenanceEventRows()}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="rule-grid rule-grid-narrow">
+      ${renderRuleGroup("資産価値・売却額", [
+        ["現車の価値", "現在査定額 × 現車残価率"],
+        ["新車の価値", "新車見積総額 × 新車残価率"],
+        ["最終売却額", "最終年の車両価値"],
+        ["年合計への扱い", "最終売却額は年合計には混ぜない"],
+        ["売却後実質コスト", "支出合計 - 最終売却額"]
+      ])}
+      ${renderRuleGroup("年合計の式", [
+        ["年合計", "ローン + 年間維持費 + 修理期待値 + 車検 + 高額イベント費用"],
+        ["除外するもの", "最終売却額は年合計に含めない"]
+      ])}
+      ${renderRuleGroup("月額の式", [
+        ["その年の必要月額", "年合計 / 12"],
+        ["累計平均月額", "累計支出 / 経過月数"],
+        ["売却後平均月額", "(支出合計 - 最終売却額) / 利用月数"]
+      ])}
+    </div>
+  `;
+}
+
+function renderRuleGroup(title, rows) {
+  return `
+    <section class="rule-block">
+      <h3>${escapeHtml(title)}</h3>
+      <dl class="rule-list">
+        ${rows.map(([label, value]) => `
+          <div>
+            <dt>${escapeHtml(label)}</dt>
+            <dd>${escapeHtml(value)}</dd>
+          </div>
+        `).join("")}
+      </dl>
+    </section>
+  `;
+}
+
+function renderMaintenanceEventRows() {
+  return (state.maintenanceEvents.events || []).map((event) => {
+    const amount = Number(event.amount || 0);
+    const probability = Number.isFinite(Number(event.probability)) ? Number(event.probability) : 1;
+    return `
+      <tr>
+        <td>${escapeHtml(event.name)}</td>
+        <td>${numberFormatter.format(event.startVehicleAge)}年目</td>
+        <td>${formatRepeatCycle(event.repeatEveryYears)}</td>
+        <td>${formatYen(amount)}</td>
+        <td>${formatPercent(probability)}</td>
+        <td>${formatYen(amount * probability)}</td>
+        <td>入る（該当車齢年）</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function formatRepeatCycle(value) {
+  const years = Number(value);
+  if (!Number.isFinite(years) || years <= 0) return "単発";
+  return `${numberFormatter.format(years)}年ごと`;
+}
+
 function renderAnnualScenarioComparisonTable() {
   annualScenarioComparisonTableHead.innerHTML = `
     <tr>
@@ -798,6 +940,10 @@ function formatYen(value) {
 
 function formatYenPerMonth(value) {
   return `${formatYen(value)} /月`;
+}
+
+function formatPercent(value) {
+  return `${percentFormatter.format(safeRate(value) * 100)}%`;
 }
 
 function setStatus(message) {
