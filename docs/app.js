@@ -99,7 +99,7 @@ const DEFAULT_ASSUMPTIONS = {
     { id: "before_inspection_9", name: "9年目車検前", replacementBeforeInspectionYear: 9 },
     { id: "before_inspection_11", name: "11年目車検前", replacementBeforeInspectionYear: 11 },
     { id: "before_inspection_13", name: "13年目車検前", replacementBeforeInspectionYear: 13 },
-    { id: "keep_until_exit", name: "最後まで維持・最終売却", keepOnly: true }
+    { id: "replace_before_15th_inspection", name: "15年目車検前", replacementBeforeInspectionYear: 15 }
   ]
 };
 
