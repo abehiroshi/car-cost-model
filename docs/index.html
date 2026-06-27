@@ -91,6 +91,14 @@
               <input name="currentVehicle.purchaseYear" type="number" step="1">
             </label>
             <label>
+              2026年時点の車齢
+              <input name="currentVehicle.ageAtStart" type="number" step="1">
+            </label>
+            <label>
+              次回車検年
+              <input name="currentVehicle.nextInspectionYear" type="number" step="1">
+            </label>
+            <label>
               現在査定額
               <input name="currentVehicle.appraisal" type="number" step="1000">
             </label>
@@ -214,7 +222,8 @@
                   <th>7年平均月額</th>
                   <th>20年平均月額</th>
                   <th>20年NPV</th>
-                  <th>最終価値控除後</th>
+                  <th>20年支出合計</th>
+                  <th>20年末車両価値</th>
                   <th>1km単価</th>
                   <th>2032年純資産</th>
                 </tr>
@@ -237,7 +246,8 @@
                   <th>維持費</th>
                   <th>修理期待値</th>
                   <th>車検</th>
-                  <th>下取り/最終価値</th>
+                  <th>車両価値</th>
+                  <th>純資産</th>
                   <th>年合計</th>
                 </tr>
               </thead>

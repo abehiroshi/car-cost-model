@@ -7,6 +7,8 @@
   "currentVehicle": {
     "name": "トヨタ ノア HEV Welcab",
     "purchaseYear": 2022,
+    "ageAtStart": 4,
+    "nextInspectionYear": 2027,
     "appraisal": 3014000,
     "loanBalance": 1491000,
     "loanMonthly": 27800,
@@ -113,7 +115,7 @@
     },
     {
       "id": "keep_until_15",
-      "name": "15年目まで維持",
+      "name": "20年維持",
       "replaceAfterYears": null,
       "keepOnly": true
     }

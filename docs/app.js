@@ -9,6 +9,8 @@ const DEFAULT_ASSUMPTIONS = {
   currentVehicle: {
     name: "トヨタ ノア HEV Welcab",
     purchaseYear: 2022,
+    ageAtStart: 4,
+    nextInspectionYear: 2027,
     appraisal: 3014000,
     loanBalance: 1491000,
     loanMonthly: 27800,
@@ -93,7 +95,7 @@ const DEFAULT_ASSUMPTIONS = {
     { id: "replace_after_2", name: "2年後買替", replaceAfterYears: 2, keepOnly: false },
     { id: "replace_after_4", name: "4年後買替", replaceAfterYears: 4, keepOnly: false },
     { id: "replace_after_6", name: "6年後買替", replaceAfterYears: 6, keepOnly: false },
-    { id: "keep_until_15", name: "15年目まで維持", replaceAfterYears: null, keepOnly: true }
+    { id: "keep_until_15", name: "20年維持", replaceAfterYears: null, keepOnly: true }
   ]
 };
 
@@ -185,20 +187,17 @@ function calculateScenario(assumptions, scenario) {
 
     const vehicleAge = hasNewVehicle
       ? year - newVehicleStartYear + 1
-      : year - assumptions.currentVehicle.purchaseYear + 1;
+      : getCurrentVehicleAgeAtIndex(assumptions, index);
     const inflation = Math.pow(1 + safeRate(assumptions.inflationRate), index);
-    const purchaseYear = replacementIndex !== null && index === replacementIndex;
     const loan = calculateLoanCost(assumptions, year, index, replacementIndex);
     const running = calculateRunningCost(assumptions, vehicleAge, inflation);
     const repair = calculateRepairCost(assumptions, vehicleAge, inflation);
-    const inspection = needsInspection(vehicleAge, assumptions.annualCosts.inspectionCycleYears)
+    const inspection = needsInspection(assumptions, year, vehicleAge, hasNewVehicle)
       ? assumptions.annualCosts.inspection * inflation
       : 0;
-    const tradeIn = purchaseYear ? -estimateCurrentVehicleValue(assumptions, index) : 0;
-    const finalValue = index === assumptions.horizonYears - 1
-      ? -estimateScenarioFinalValue(assumptions, scenario, vehicleAge, hasNewVehicle)
-      : 0;
-    const total = loan + running + repair + inspection + tradeIn + finalValue;
+    const vehicleValue = estimateVehicleValueAtIndex(assumptions, index, replacementIndex, hasNewVehicle, vehicleAge);
+    const netAsset = estimateNetAssetAtIndex(assumptions, year, index, replacementIndex, hasNewVehicle, vehicleAge);
+    const total = loan + running + repair + inspection;
 
     rows.push({
       year,
@@ -207,7 +206,8 @@ function calculateScenario(assumptions, scenario) {
       running,
       repair,
       inspection,
-      tradeInAndFinal: tradeIn + finalValue,
+      vehicleValue,
+      netAsset,
       total
     });
   }
@@ -215,8 +215,8 @@ function calculateScenario(assumptions, scenario) {
   const total7 = sum(rows.slice(0, Math.min(7, rows.length)).map((row) => row.total));
   const total20 = sum(rows.map((row) => row.total));
   const npv = sum(rows.map((row, index) => row.total / Math.pow(1 + safeRate(assumptions.discountRate), index)));
-  const finalValueAdjusted = total20;
   const totalKm = assumptions.annualKm * rows.length;
+  const finalRow = rows[rows.length - 1];
   const netAsset2032 = estimateNetAssetAtYear(assumptions, scenario, 2032);
 
   return {
@@ -225,7 +225,8 @@ function calculateScenario(assumptions, scenario) {
     averageMonthly7: total7 / Math.min(7, rows.length) / 12,
     averageMonthly20: total20 / rows.length / 12,
     npv,
-    finalValueAdjusted,
+    totalCost20: total20,
+    vehicleValueEnd: finalRow?.vehicleValue ?? 0,
     yenPerKm: totalKm > 0 ? total20 / totalKm : 0,
     netAsset2032
   };
@@ -263,9 +264,19 @@ function calculateRepairCost(assumptions, vehicleAge, inflation) {
   return (base + assumptions.annualCosts.welcabExtraRepair) * inflation;
 }
 
-function needsInspection(vehicleAge, cycleYears) {
-  const cycle = Math.max(1, Number(cycleYears) || 2);
+function needsInspection(assumptions, year, vehicleAge, hasNewVehicle) {
+  const cycle = Math.max(1, Number(assumptions.annualCosts.inspectionCycleYears) || 2);
+  const nextInspectionYear = Number(assumptions.currentVehicle.nextInspectionYear);
+  if (!hasNewVehicle && Number.isFinite(nextInspectionYear)) {
+    return year >= nextInspectionYear && (year - nextInspectionYear) % cycle === 0;
+  }
   return vehicleAge >= 3 && (vehicleAge - 3) % cycle === 0;
+}
+
+function getCurrentVehicleAgeAtIndex(assumptions, index) {
+  const ageAtStart = Number(assumptions.currentVehicle.ageAtStart);
+  if (Number.isFinite(ageAtStart) && ageAtStart > 0) return ageAtStart + index;
+  return assumptions.startYear + index - assumptions.currentVehicle.purchaseYear;
 }
 
 function estimateCurrentVehicleValue(assumptions, yearsFromStart) {
@@ -294,10 +305,9 @@ function lookupRetention(table, key, fallbackAnnualRate, exponentOffset = 0) {
   return Math.pow(fallbackAnnualRate, Math.max(0, key - exponentOffset));
 }
 
-function estimateScenarioFinalValue(assumptions, scenario, vehicleAge, hasNewVehicle) {
-  if (hasNewVehicle && !scenario.keepOnly) return estimateNewVehicleValue(assumptions, vehicleAge);
-  const yearsFromStart = Math.max(0, assumptions.horizonYears - 1);
-  return estimateCurrentVehicleValue(assumptions, yearsFromStart);
+function estimateVehicleValueAtIndex(assumptions, index, replacementIndex, hasNewVehicle, vehicleAge) {
+  if (hasNewVehicle && replacementIndex !== null) return estimateNewVehicleValue(assumptions, vehicleAge);
+  return estimateCurrentVehicleValue(assumptions, index);
 }
 
 function estimateNetAssetAtYear(assumptions, scenario, targetYear) {
@@ -313,6 +323,14 @@ function estimateNetAssetAtYear(assumptions, scenario, targetYear) {
   const newAge = index - replacementIndex + 1;
   const yearInNewLoan = index - replacementIndex;
   return estimateNewVehicleValue(assumptions, newAge) - estimateNewLoanBalance(assumptions, yearInNewLoan);
+}
+
+function estimateNetAssetAtIndex(assumptions, year, index, replacementIndex, hasNewVehicle, vehicleAge) {
+  if (!hasNewVehicle || replacementIndex === null) {
+    return estimateCurrentVehicleValue(assumptions, index) - estimateCurrentLoanBalance(assumptions, year);
+  }
+  const yearInNewLoan = index - replacementIndex;
+  return estimateNewVehicleValue(assumptions, vehicleAge) - estimateNewLoanBalance(assumptions, yearInNewLoan);
 }
 
 function estimateCurrentLoanBalance(assumptions, year) {
@@ -362,7 +380,8 @@ function renderScenarioTable() {
       <td>${formatYen(result.averageMonthly7)}</td>
       <td>${formatYen(result.averageMonthly20)}</td>
       <td>${formatYen(result.npv)}</td>
-      <td>${formatYen(result.finalValueAdjusted)}</td>
+      <td>${formatYen(result.totalCost20)}</td>
+      <td>${formatYen(result.vehicleValueEnd)}</td>
       <td>${formatYen(result.yenPerKm)}</td>
       <td>${formatYen(result.netAsset2032)}</td>
     `;
@@ -389,7 +408,8 @@ function renderCashflowTable() {
       <td>${formatYen(item.running)}</td>
       <td>${formatYen(item.repair)}</td>
       <td>${formatYen(item.inspection)}</td>
-      <td>${formatYen(item.tradeInAndFinal)}</td>
+      <td>${formatYen(item.vehicleValue)}</td>
+      <td>${formatYen(item.netAsset)}</td>
       <td>${formatYen(item.total)}</td>
     `;
     cashflowTableBody.appendChild(row);
@@ -408,7 +428,7 @@ async function copyJson() {
 }
 
 function buildComparisonCsv(results) {
-  const headers = ["scenario", "averageMonthly7", "averageMonthly20", "npv20", "finalValueAdjusted", "yenPerKm", "netAsset2032"];
+  const headers = ["scenario", "averageMonthly7", "averageMonthly20", "npv20", "totalCost20", "vehicleValueEnd", "yenPerKm", "netAsset2032"];
   const lines = [headers.join(",")];
   for (const result of results) {
     lines.push([
@@ -416,7 +436,8 @@ function buildComparisonCsv(results) {
       Math.round(result.averageMonthly7),
       Math.round(result.averageMonthly20),
       Math.round(result.npv),
-      Math.round(result.finalValueAdjusted),
+      Math.round(result.totalCost20),
+      Math.round(result.vehicleValueEnd),
       Math.round(result.yenPerKm),
       Math.round(result.netAsset2032)
     ].map(csvCell).join(","));
