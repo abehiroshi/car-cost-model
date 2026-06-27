@@ -4,6 +4,9 @@ const DEFAULT_ASSUMPTIONS = {
   startYear: 2026,
   horizonYears: 20,
   annualKm: 2500,
+  currentAge: 47,
+  drivingYearsRemaining: 25,
+  cycleHorizonYears: 25,
   discountRate: 0.02,
   inflationRate: 0,
   currentVehicle: {
@@ -91,18 +94,20 @@ const DEFAULT_ASSUMPTIONS = {
     minimumValueRate: 0.03
   },
   scenarios: [
-    { id: "replace_now", name: "今買替", replaceAfterYears: 0, keepOnly: false },
-    { id: "replace_after_2", name: "2年後買替", replaceAfterYears: 2, keepOnly: false },
-    { id: "replace_after_4", name: "4年後買替", replaceAfterYears: 4, keepOnly: false },
-    { id: "replace_after_6", name: "6年後買替", replaceAfterYears: 6, keepOnly: false },
-    { id: "keep_until_15", name: "20年維持", replaceAfterYears: null, keepOnly: true }
+    { id: "now_cycle_5", name: "今買替・5年サイクル", initialKeepYears: 0, cycleYears: 5 },
+    { id: "now_cycle_7", name: "今買替・7年サイクル", initialKeepYears: 0, cycleYears: 7 },
+    { id: "now_cycle_10", name: "今買替・10年サイクル", initialKeepYears: 0, cycleYears: 10 },
+    { id: "keep_5_then_10", name: "現車をあと5年維持・以後10年サイクル", initialKeepYears: 5, cycleYears: 10 },
+    { id: "keep_10_then_15", name: "現車をあと10年維持・以後15年または最後まで", initialKeepYears: 10, cycleYears: 15 },
+    { id: "keep_20_then_last_car", name: "現車を20年維持・最後に1回買替", initialKeepYears: 20, cycleYears: null },
+    { id: "keep_current_until_exit", name: "現車を最後まで維持・最終売却", initialKeepYears: null, cycleYears: null, keepOnly: true }
   ]
 };
 
 const state = {
   assumptions: structuredClone(DEFAULT_ASSUMPTIONS),
   results: [],
-  selectedScenarioId: "replace_now"
+  selectedScenarioId: "now_cycle_5"
 };
 
 const form = document.querySelector("#assumptionForm");
@@ -148,12 +153,27 @@ function bindEvents() {
     recalculate();
   });
 
-  document.querySelector("#copyJsonButton").addEventListener("click", copyJson);
-  document.querySelector("#downloadJsonButton").addEventListener("click", () => {
-    downloadFile("car-cost-assumptions.json", JSON.stringify(state.assumptions, null, 2), "application/json");
+  const headerActions = document.querySelector(".header-actions");
+  headerActions.addEventListener("pointerdown", (event) => {
+    const button = event.target.closest("[data-action='copy-json']");
+    if (!button) return;
+    copyJson();
   });
-  document.querySelector("#downloadCsvButton").addEventListener("click", () => {
-    downloadFile("car-cost-scenarios.csv", buildComparisonCsv(state.results), "text/csv;charset=utf-8");
+  headerActions.addEventListener("keydown", (event) => {
+    const button = event.target.closest("[data-action='copy-json']");
+    if (!button || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    copyJson();
+  });
+  headerActions.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "download-json") {
+      downloadFile("car-cost-assumptions.json", JSON.stringify(state.assumptions, null, 2), "application/json");
+    }
+    if (button.dataset.action === "download-csv") {
+      downloadFile("car-cost-scenarios.csv", buildComparisonCsv(state.results), "text/csv;charset=utf-8");
+    }
   });
 }
 
@@ -174,75 +194,113 @@ function recalculate() {
 
 function calculateScenario(assumptions, scenario) {
   const rows = [];
-  const replacementIndex = scenario.keepOnly ? null : Number(scenario.replaceAfterYears);
-  let hasNewVehicle = replacementIndex === 0;
-  let newVehicleStartYear = hasNewVehicle ? assumptions.startYear : null;
+  const horizonYears = getCycleHorizonYears(assumptions);
+  const replacementYears = buildReplacementYears(scenario, horizonYears);
+  let activeReplacementIndex = null;
 
-  for (let index = 0; index < assumptions.horizonYears; index += 1) {
+  for (let index = 0; index < horizonYears; index += 1) {
     const year = assumptions.startYear + index;
-    if (replacementIndex !== null && index >= replacementIndex) {
-      hasNewVehicle = true;
-      newVehicleStartYear = assumptions.startYear + replacementIndex;
-    }
+    const replacementEvent = replacementYears.includes(index);
+    if (replacementEvent) activeReplacementIndex = index;
 
-    const vehicleAge = hasNewVehicle
-      ? year - newVehicleStartYear + 1
-      : getCurrentVehicleAgeAtIndex(assumptions, index);
+    const hasNewVehicle = activeReplacementIndex !== null;
+    const vehicleAge = hasNewVehicle ? index - activeReplacementIndex + 1 : getCurrentVehicleAgeAtIndex(assumptions, index);
+    const vehicleLabel = hasNewVehicle ? `買替車 ${replacementYears.indexOf(activeReplacementIndex) + 1}` : "現車";
+    const driverAge = assumptions.currentAge + index;
     const inflation = Math.pow(1 + safeRate(assumptions.inflationRate), index);
-    const loan = calculateLoanCost(assumptions, year, index, replacementIndex);
+    const loan = calculateLoanCost(assumptions, year, index, activeReplacementIndex);
     const running = calculateRunningCost(assumptions, vehicleAge, inflation);
     const repair = calculateRepairCost(assumptions, vehicleAge, inflation);
     const inspection = needsInspection(assumptions, year, vehicleAge, hasNewVehicle)
       ? assumptions.annualCosts.inspection * inflation
       : 0;
-    const vehicleValue = estimateVehicleValueAtIndex(assumptions, index, replacementIndex, hasNewVehicle, vehicleAge);
-    const netAsset = estimateNetAssetAtIndex(assumptions, year, index, replacementIndex, hasNewVehicle, vehicleAge);
+    const vehicleValue = estimateVehicleValueAtIndex(assumptions, index, hasNewVehicle, vehicleAge);
+    const netAsset = estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge);
+    const finalSaleAmount = index === horizonYears - 1 ? vehicleValue : 0;
     const total = loan + running + repair + inspection;
+    const events = [];
+    if (replacementEvent) events.push("買替");
+    if (inspection > 0) events.push("車検");
+    if (finalSaleAmount > 0) events.push("最終売却");
 
     rows.push({
       year,
+      driverAge,
       vehicleAge,
+      vehicleLabel,
+      event: events.join(" / ") || "-",
       loan,
       running,
       repair,
       inspection,
       vehicleValue,
       netAsset,
+      finalSaleAmount,
       total
     });
   }
 
-  const total7 = sum(rows.slice(0, Math.min(7, rows.length)).map((row) => row.total));
-  const total20 = sum(rows.map((row) => row.total));
+  const totalCost = sum(rows.map((row) => row.total));
   const npv = sum(rows.map((row, index) => row.total / Math.pow(1 + safeRate(assumptions.discountRate), index)));
-  const totalKm = assumptions.annualKm * rows.length;
   const finalRow = rows[rows.length - 1];
-  const netAsset2032 = estimateNetAssetAtYear(assumptions, scenario, 2032);
+  const finalSaleAmount = finalRow?.finalSaleAmount ?? 0;
+  const effectiveCostAfterSale = totalCost - finalSaleAmount;
+  const months = rows.length * 12;
+  const totalKm = assumptions.annualKm * rows.length;
 
   return {
     scenario,
     rows,
-    averageMonthly7: total7 / Math.min(7, rows.length) / 12,
-    averageMonthly20: total20 / rows.length / 12,
+    horizonYears: rows.length,
+    endAge: assumptions.currentAge + rows.length,
+    replacementCount: replacementYears.length,
+    inspectionCount: rows.filter((row) => row.inspection > 0).length,
+    totalCost,
+    averageMonthly: months > 0 ? totalCost / months : 0,
     npv,
-    totalCost20: total20,
-    vehicleValueEnd: finalRow?.vehicleValue ?? 0,
-    yenPerKm: totalKm > 0 ? total20 / totalKm : 0,
-    netAsset2032
+    finalVehicleValue: finalRow?.vehicleValue ?? 0,
+    finalSaleAmount,
+    effectiveCostAfterSale,
+    averageMonthlyAfterSale: months > 0 ? effectiveCostAfterSale / months : 0,
+    yenPerKm: totalKm > 0 ? effectiveCostAfterSale / totalKm : 0,
+    endNetAsset: finalRow?.netAsset ?? 0
   };
 }
 
-function calculateLoanCost(assumptions, year, index, replacementIndex) {
+function getCycleHorizonYears(assumptions) {
+  return Math.max(1, Number(assumptions.cycleHorizonYears || assumptions.drivingYearsRemaining || assumptions.horizonYears) || 25);
+}
+
+function buildReplacementYears(scenario, horizonYears) {
+  const years = [];
+  if (scenario.keepOnly === true || scenario.initialKeepYears === null) return years;
+
+  const firstReplacement = Number(scenario.initialKeepYears);
+  if (!Number.isFinite(firstReplacement) || firstReplacement < 0 || firstReplacement >= horizonYears - 1) return years;
+
+  years.push(firstReplacement);
+  const cycleYears = Number(scenario.cycleYears);
+  if (!Number.isFinite(cycleYears) || cycleYears <= 0) return years;
+
+  let nextReplacement = firstReplacement + cycleYears;
+  while (nextReplacement < horizonYears - 1) {
+    years.push(nextReplacement);
+    nextReplacement += cycleYears;
+  }
+  return years;
+}
+
+function calculateLoanCost(assumptions, year, index, activeReplacementIndex) {
   const current = assumptions.currentVehicle;
   const next = assumptions.newVehicle;
 
-  if (replacementIndex === null || index < replacementIndex) {
+  if (activeReplacementIndex === null) {
     let cost = year <= current.loanEndYear ? current.loanMonthly * 12 : 0;
     if (year === current.loanEndYear) cost += current.loanFinal;
     return cost;
   }
 
-  const loanYearIndex = index - replacementIndex;
+  const loanYearIndex = index - activeReplacementIndex;
   if (loanYearIndex >= next.loanYears) return 0;
 
   let cost = next.loanMonthly * 12 + next.bonusPerPayment * next.bonusPaymentsPerYear;
@@ -305,31 +363,16 @@ function lookupRetention(table, key, fallbackAnnualRate, exponentOffset = 0) {
   return Math.pow(fallbackAnnualRate, Math.max(0, key - exponentOffset));
 }
 
-function estimateVehicleValueAtIndex(assumptions, index, replacementIndex, hasNewVehicle, vehicleAge) {
-  if (hasNewVehicle && replacementIndex !== null) return estimateNewVehicleValue(assumptions, vehicleAge);
+function estimateVehicleValueAtIndex(assumptions, index, hasNewVehicle, vehicleAge) {
+  if (hasNewVehicle) return estimateNewVehicleValue(assumptions, vehicleAge);
   return estimateCurrentVehicleValue(assumptions, index);
 }
 
-function estimateNetAssetAtYear(assumptions, scenario, targetYear) {
-  const index = targetYear - assumptions.startYear;
-  if (index < 0) return 0;
-
-  const replacementIndex = scenario.keepOnly ? null : Number(scenario.replaceAfterYears);
-  const ownsNew = replacementIndex !== null && index >= replacementIndex;
-  if (!ownsNew) {
-    return estimateCurrentVehicleValue(assumptions, index) - estimateCurrentLoanBalance(assumptions, targetYear);
-  }
-
-  const newAge = index - replacementIndex + 1;
-  const yearInNewLoan = index - replacementIndex;
-  return estimateNewVehicleValue(assumptions, newAge) - estimateNewLoanBalance(assumptions, yearInNewLoan);
-}
-
-function estimateNetAssetAtIndex(assumptions, year, index, replacementIndex, hasNewVehicle, vehicleAge) {
-  if (!hasNewVehicle || replacementIndex === null) {
+function estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge) {
+  if (!hasNewVehicle || activeReplacementIndex === null) {
     return estimateCurrentVehicleValue(assumptions, index) - estimateCurrentLoanBalance(assumptions, year);
   }
-  const yearInNewLoan = index - replacementIndex;
+  const yearInNewLoan = index - activeReplacementIndex;
   return estimateNewVehicleValue(assumptions, vehicleAge) - estimateNewLoanBalance(assumptions, yearInNewLoan);
 }
 
@@ -347,27 +390,22 @@ function estimateNewLoanBalance(assumptions, yearInLoan) {
 }
 
 function renderDashboard() {
-  const cheapest = [...state.results].sort((a, b) => a.averageMonthly7 - b.averageMonthly7)[0];
-  const replaceNow = state.results.find((result) => result.scenario.id === "replace_now");
-  const keepCandidates = state.results.filter((result) => result.scenario.id !== "replace_now");
-  const keepMin = [...keepCandidates].sort((a, b) => a.averageMonthly7 - b.averageMonthly7)[0];
-  const diff = replaceNow.averageMonthly7 - keepMin.averageMonthly7;
+  const cheapest = [...state.results].sort((a, b) => a.averageMonthlyAfterSale - b.averageMonthlyAfterSale)[0];
+  const highest = [...state.results].sort((a, b) => b.averageMonthlyAfterSale - a.averageMonthlyAfterSale)[0];
+  const diff = highest.averageMonthlyAfterSale - cheapest.averageMonthlyAfterSale;
   const decisionCard = document.querySelector(".metric-card.decision");
 
   document.querySelector("#cheapestScenario").textContent = cheapest.scenario.name;
-  document.querySelector("#cheapestAmount").textContent = `${formatYen(cheapest.averageMonthly7)} / 月`;
-  document.querySelector("#replaceNowMonthly").textContent = formatYen(replaceNow.averageMonthly7);
-  document.querySelector("#keepMonthly").textContent = formatYen(keepMin.averageMonthly7);
-
-  if (diff <= 0) {
-    document.querySelector("#decisionText").textContent = "今買替も候補";
-    document.querySelector("#decisionDetail").textContent = `維持系最小より月 ${formatYen(Math.abs(diff))} 有利`;
-    decisionCard.classList.add("is-good");
-  } else {
-    document.querySelector("#decisionText").textContent = "維持優先";
-    document.querySelector("#decisionDetail").textContent = `今買替は月 ${formatYen(diff)} 高い`;
-    decisionCard.classList.remove("is-good");
-  }
+  document.querySelector("#cheapestAmount").textContent = `${formatYen(cheapest.averageMonthlyAfterSale)} / 月`;
+  document.querySelector("#totalCost25").textContent = formatYen(cheapest.totalCost);
+  document.querySelector("#netCostAfterSale").textContent = formatYen(cheapest.effectiveCostAfterSale);
+  document.querySelector("#averageMonthly25").textContent = formatYen(cheapest.averageMonthly);
+  document.querySelector("#averageMonthlyAfterSale").textContent = formatYen(cheapest.averageMonthlyAfterSale);
+  document.querySelector("#replacementCount").textContent = `${numberFormatter.format(cheapest.replacementCount)}回`;
+  document.querySelector("#inspectionCount").textContent = `${numberFormatter.format(cheapest.inspectionCount)}回`;
+  document.querySelector("#decisionText").textContent = "売却後実質コスト重視";
+  document.querySelector("#decisionDetail").textContent = `最安平均との差は最大で月 ${formatYen(diff)}`;
+  decisionCard.classList.add("is-good");
 }
 
 function renderScenarioTable() {
@@ -377,13 +415,18 @@ function renderScenarioTable() {
     row.className = result.scenario.id === state.selectedScenarioId ? "is-selected" : "";
     row.innerHTML = `
       <td>${escapeHtml(result.scenario.name)}</td>
-      <td>${formatYen(result.averageMonthly7)}</td>
-      <td>${formatYen(result.averageMonthly20)}</td>
+      <td>${numberFormatter.format(result.endAge)}歳</td>
+      <td>${numberFormatter.format(result.replacementCount)}回</td>
+      <td>${numberFormatter.format(result.inspectionCount)}回</td>
+      <td>${formatYen(result.totalCost)}</td>
+      <td>${formatYen(result.averageMonthly)}</td>
+      <td>${formatYen(result.finalVehicleValue)}</td>
+      <td>${formatYen(result.finalSaleAmount)}</td>
+      <td>${formatYen(result.effectiveCostAfterSale)}</td>
+      <td>${formatYen(result.averageMonthlyAfterSale)}</td>
       <td>${formatYen(result.npv)}</td>
-      <td>${formatYen(result.totalCost20)}</td>
-      <td>${formatYen(result.vehicleValueEnd)}</td>
       <td>${formatYen(result.yenPerKm)}</td>
-      <td>${formatYen(result.netAsset2032)}</td>
+      <td>${formatYen(result.endNetAsset)}</td>
     `;
     row.addEventListener("click", () => {
       state.selectedScenarioId = result.scenario.id;
@@ -403,13 +446,17 @@ function renderCashflowTable() {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${item.year}</td>
+      <td>${numberFormatter.format(item.driverAge)}歳</td>
       <td>${numberFormatter.format(item.vehicleAge)}年</td>
+      <td>${escapeHtml(item.vehicleLabel)}</td>
+      <td>${escapeHtml(item.event)}</td>
       <td>${formatYen(item.loan)}</td>
       <td>${formatYen(item.running)}</td>
       <td>${formatYen(item.repair)}</td>
       <td>${formatYen(item.inspection)}</td>
       <td>${formatYen(item.vehicleValue)}</td>
       <td>${formatYen(item.netAsset)}</td>
+      <td>${formatYen(item.finalSaleAmount)}</td>
       <td>${formatYen(item.total)}</td>
     `;
     cashflowTableBody.appendChild(row);
@@ -419,7 +466,13 @@ function renderCashflowTable() {
 async function copyJson() {
   const text = JSON.stringify(state.assumptions, null, 2);
   try {
-    await navigator.clipboard.writeText(text);
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard API is unavailable");
+    await Promise.race([
+      navigator.clipboard.writeText(text),
+      new Promise((_, reject) => {
+        window.setTimeout(() => reject(new Error("Clipboard write timed out")), 1200);
+      })
+    ]);
     setStatus("現在条件をJSONコピーしました");
   } catch (error) {
     window.prompt("コピーできない場合は選択してコピーしてください", text);
@@ -428,18 +481,37 @@ async function copyJson() {
 }
 
 function buildComparisonCsv(results) {
-  const headers = ["scenario", "averageMonthly7", "averageMonthly20", "npv20", "totalCost20", "vehicleValueEnd", "yenPerKm", "netAsset2032"];
+  const headers = [
+    "scenario",
+    "endAge",
+    "replacementCount",
+    "inspectionCount",
+    "totalCost",
+    "averageMonthly",
+    "finalVehicleValue",
+    "finalSaleAmount",
+    "effectiveCostAfterSale",
+    "averageMonthlyAfterSale",
+    "npv",
+    "yenPerKm",
+    "endNetAsset"
+  ];
   const lines = [headers.join(",")];
   for (const result of results) {
     lines.push([
       result.scenario.name,
-      Math.round(result.averageMonthly7),
-      Math.round(result.averageMonthly20),
+      result.endAge,
+      result.replacementCount,
+      result.inspectionCount,
+      Math.round(result.totalCost),
+      Math.round(result.averageMonthly),
+      Math.round(result.finalVehicleValue),
+      Math.round(result.finalSaleAmount),
+      Math.round(result.effectiveCostAfterSale),
+      Math.round(result.averageMonthlyAfterSale),
       Math.round(result.npv),
-      Math.round(result.totalCost20),
-      Math.round(result.vehicleValueEnd),
       Math.round(result.yenPerKm),
-      Math.round(result.netAsset2032)
+      Math.round(result.endNetAsset)
     ].map(csvCell).join(","));
   }
   return `\uFEFF${lines.join("\n")}`;
