@@ -211,7 +211,7 @@ function recalculate() {
 function calculateScenario(assumptions, maintenanceEvents, scenario) {
   const rows = [];
   const horizonYears = getCycleHorizonYears(assumptions);
-  const replacementYears = buildReplacementYears(scenario, horizonYears);
+  const replacementYears = buildReplacementYears(scenario, horizonYears, assumptions);
   let activeReplacementIndex = null;
 
   for (let index = 0; index < horizonYears; index += 1) {
@@ -293,19 +293,28 @@ function getCycleHorizonYears(assumptions) {
   return Math.max(1, Number(assumptions.cycleHorizonYears || assumptions.drivingYearsRemaining || assumptions.horizonYears) || 25);
 }
 
-function buildReplacementYears(scenario, horizonYears) {
+function buildReplacementYears(scenario, horizonYears, assumptions) {
   const years = [];
   if (scenario.keepOnly === true) return years;
 
   const replacementInterval = getReplacementBeforeInspectionInterval(scenario.replacementBeforeInspectionYear);
   if (!Number.isFinite(replacementInterval) || replacementInterval <= 0) return years;
 
-  let nextReplacement = 0;
+  let nextReplacement = getCurrentVehicleFirstReplacementIndex(scenario, assumptions);
+  if (!Number.isFinite(nextReplacement) || nextReplacement >= horizonYears - 1) return years;
+
   while (nextReplacement < horizonYears - 1) {
     years.push(nextReplacement);
     nextReplacement += replacementInterval;
   }
   return years;
+}
+
+function getCurrentVehicleFirstReplacementIndex(scenario, assumptions) {
+  const inspectionYear = Number(scenario.replacementBeforeInspectionYear);
+  const currentAgeAtStart = Number(assumptions.currentVehicle?.ageAtStart);
+  if (!Number.isFinite(inspectionYear) || !Number.isFinite(currentAgeAtStart)) return NaN;
+  return Math.max(0, inspectionYear - currentAgeAtStart - 1);
 }
 
 function getReplacementBeforeInspectionInterval(inspectionYear) {
