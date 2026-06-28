@@ -129,6 +129,7 @@ const form = document.querySelector("#assumptionForm");
 const scenarioTableBody = document.querySelector("#scenarioTableBody");
 const annualScenarioComparisonTableHead = document.querySelector("#annualScenarioComparisonTableHead");
 const annualScenarioComparisonTableBody = document.querySelector("#annualScenarioComparisonTableBody");
+const purchaseLoanCashflowTableBody = document.querySelector("#purchaseLoanCashflowTableBody");
 const cashflowTableBody = document.querySelector("#cashflowTableBody");
 const costRulesContent = document.querySelector("#costRulesContent");
 const loanAdjustmentMessage = document.querySelector("#loanAdjustmentMessage");
@@ -216,6 +217,13 @@ function bindEvents() {
     if (!button) return;
     downloadFile("car-cost-annual-scenario-comparison.csv", buildAnnualScenarioComparisonCsv(state.results), "text/csv;charset=utf-8");
   });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action='download-purchase-loan-csv']");
+    if (!button) return;
+    const selected = getSelectedResult();
+    downloadFile(`car-cost-purchase-loan-${selected.scenario.id}.csv`, buildPurchaseLoanCashflowCsv(selected), "text/csv;charset=utf-8");
+  });
 }
 
 function populateForm() {
@@ -234,6 +242,7 @@ function recalculate() {
   renderScenarioTable();
   renderCostRules();
   renderAnnualScenarioComparisonTable();
+  renderPurchaseLoanCashflowTable();
   renderCashflowTable();
 }
 
@@ -248,6 +257,13 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
   for (let index = 0; index < horizonYears; index += 1) {
     const year = assumptions.startYear + index;
     const replacementEvent = replacementYears.includes(index);
+    const isYearBeforeReplacement = replacementYears.includes(index + 1);
+    const previousReplacementIndex = activeReplacementIndex;
+    const outgoingHasNewVehicle = previousReplacementIndex !== null;
+    const outgoingVehicleAge = outgoingHasNewVehicle ? index - previousReplacementIndex + 1 : getCurrentVehicleAgeAtIndex(assumptions, index);
+    const tradeInAmount = replacementEvent
+      ? estimateVehicleValueAtIndex(assumptions, index, outgoingHasNewVehicle, outgoingVehicleAge)
+      : 0;
     if (replacementEvent) activeReplacementIndex = index;
 
     const hasNewVehicle = activeReplacementIndex !== null;
@@ -255,13 +271,22 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
     const vehicleLabel = hasNewVehicle ? `買替車 ${replacementYears.indexOf(activeReplacementIndex) + 1}` : "現車";
     const driverAge = assumptions.currentAge + index;
     const inflation = Math.pow(1 + safeRate(assumptions.inflationRate), index);
-    const loan = calculateLoanCost(assumptions, year, index, activeReplacementIndex, replacementYears, scenarioLoan);
+    const currentLoan = calculateCurrentLoanCost(assumptions, year, activeReplacementIndex);
+    const replacementLoan = calculateReplacementLoanTotal(index, activeReplacementIndex, replacementYears, scenarioLoan);
+    const loan = currentLoan + replacementLoan;
     const running = calculateRunningCost(assumptions, vehicleAge, inflation);
     const repair = calculateRepairCost(assumptions, vehicleAge, inflation);
     const inspection = needsInspection(assumptions, year, vehicleAge, hasNewVehicle)
       ? assumptions.annualCosts.inspection * inflation
       : 0;
-    const majorEvents = calculateMajorEvents(maintenanceEvents, vehicleAge, inflation);
+    const majorEventVehicleAge = replacementEvent ? outgoingVehicleAge : vehicleAge;
+    const matchedMajorEvents = calculateMajorEvents(maintenanceEvents, majorEventVehicleAge, inflation);
+    const suppressMajorEvents = replacementEvent || isYearBeforeReplacement;
+    const majorEventsSuppressed = suppressMajorEvents && matchedMajorEvents.length > 0;
+    const majorEvents = calculateMajorEvents(maintenanceEvents, majorEventVehicleAge, inflation, suppressMajorEvents);
+    const skippedMajorEventReason = majorEventsSuppressed
+      ? (replacementEvent ? "買替年のため見送り" : "買替前年のため見送り")
+      : "";
     const eventCost = sum(majorEvents.map((event) => event.expectedCost));
     const vehicleValue = estimateVehicleValueAtIndex(assumptions, index, hasNewVehicle, vehicleAge);
     const netAsset = estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge, replacementYears, scenarioLoan);
@@ -274,6 +299,7 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
     const events = [];
     if (replacementEvent) events.push("買替");
     if (inspection > 0) events.push("車検");
+    if (majorEventsSuppressed) events.push("高額イベント見送り（買替前）");
     if (finalSaleAmount > 0) events.push("最終売却");
 
     rows.push({
@@ -283,13 +309,23 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
       vehicleLabel,
       event: events.join(" / ") || "-",
       loan,
+      currentLoan,
+      replacementLoan,
       appliedLoanYears: hasNewVehicle ? scenarioLoan.loanYears : null,
       appliedLoanType: hasNewVehicle ? scenarioLoan.loanType : "current",
       loanMonthlyEquivalent,
+      newVehiclePurchaseCost: replacementEvent ? assumptions.newVehicle.estimateTotal : 0,
+      tradeInAmount,
+      loanInitialDownPayment: replacementEvent ? scenarioLoan.loanInitialDownPayment : 0,
+      loanFinalMonthly: replacementLoan > 0 && isReplacementLoanFinalYear(index, replacementYears, scenarioLoan) ? scenarioLoan.loanFinalMonthly : 0,
+      residualValue: replacementLoan > 0 && isReplacementLoanFinalYear(index, replacementYears, scenarioLoan) ? scenarioLoan.residualValue : 0,
+      loanRelatedTotal: loan,
       running,
       repair,
       inspection,
       majorEvents,
+      majorEventsSuppressed,
+      skippedMajorEventReason,
       eventCost,
       vehicleValue,
       netAsset,
@@ -400,6 +436,11 @@ function buildScenarioLoanTerms(scenario, newVehicle) {
 }
 
 function calculateLoanCost(assumptions, year, index, activeReplacementIndex, replacementYears, scenarioLoan) {
+  return calculateCurrentLoanCost(assumptions, year, activeReplacementIndex)
+    + calculateReplacementLoanTotal(index, activeReplacementIndex, replacementYears, scenarioLoan);
+}
+
+function calculateCurrentLoanCost(assumptions, year, activeReplacementIndex) {
   const current = assumptions.currentVehicle;
 
   if (activeReplacementIndex === null) {
@@ -408,6 +449,11 @@ function calculateLoanCost(assumptions, year, index, activeReplacementIndex, rep
     return cost;
   }
 
+  return 0;
+}
+
+function calculateReplacementLoanTotal(index, activeReplacementIndex, replacementYears, scenarioLoan) {
+  if (activeReplacementIndex === null) return 0;
   return sum(replacementYears.map((replacementIndex) => calculateReplacementLoanCost(index, replacementIndex, scenarioLoan)));
 }
 
@@ -424,6 +470,10 @@ function calculateReplacementLoanCost(index, replacementIndex, scenarioLoan) {
   return cost;
 }
 
+function isReplacementLoanFinalYear(index, replacementYears, scenarioLoan) {
+  return replacementYears.some((replacementIndex) => index - replacementIndex === scenarioLoan.loanYears - 1);
+}
+
 function calculateRunningCost(assumptions, vehicleAge, inflation) {
   const costs = assumptions.annualCosts;
   return (costs.autoTax + costs.insurance + costs.fuel + costs.maintenance) * inflation;
@@ -438,7 +488,8 @@ function calculateRepairCost(assumptions, vehicleAge, inflation) {
   return (base + assumptions.annualCosts.welcabExtraRepair) * inflation;
 }
 
-function calculateMajorEvents(maintenanceEvents, vehicleAge, inflation) {
+function calculateMajorEvents(maintenanceEvents, vehicleAge, inflation, suppressMajorEvents = false) {
+  if (suppressMajorEvents) return [];
   return (maintenanceEvents.events || [])
     .filter((event) => matchesMaintenanceEvent(event, vehicleAge))
     .map((event) => {
@@ -582,6 +633,7 @@ function renderScenarioTable() {
     row.addEventListener("click", () => {
       state.selectedScenarioId = result.scenario.id;
       renderScenarioTable();
+      renderPurchaseLoanCashflowTable();
       renderCashflowTable();
       renderUpcomingEvents();
     });
@@ -658,7 +710,7 @@ function renderCostRules() {
 
     <section class="rule-block">
       <h3>高額イベント</h3>
-      <p>タイヤ、補機バッテリー等は該当車齢の年にイベント費用として年合計へ加算します。確率があるイベントは 金額 × 確率 を期待値として加算します。比較対象は5/7/9/11/13/15年目車検前で、短期買替では車齢到達前に買替されるため発生しにくくなります。</p>
+      <p>タイヤ、補機バッテリー等は該当車齢の年にイベント費用として年合計へ加算します。確率があるイベントは 金額 × 確率 を期待値として加算します。ただし買替年と買替前年は、買替で回避する前提として高額イベントを実施せず、イベント費用を0円にします。</p>
       <div class="table-wrap compact-table-wrap">
         <table class="rules-table">
           <thead>
@@ -684,12 +736,16 @@ function renderCostRules() {
         ["現車の価値", "現在査定額 × 現車残価率"],
         ["新車の価値", "新車見積総額 × 新車残価率"],
         ["最終売却額", "最終年の車両価値"],
+        ["下取り想定額", "買替時点の車両推定価値"],
         ["年合計への扱い", "最終売却額は年合計には混ぜない"],
+        ["下取り想定額の扱い", "資産移動として表示し、年合計には含めない"],
         ["売却後実質コスト", "支出合計 - 最終売却額"]
       ])}
       ${renderRuleGroup("年合計の式", [
         ["年合計", "ローン + 年間維持費 + 修理期待値 + 車検 + 高額イベント費用"],
-        ["除外するもの", "最終売却額は年合計に含めない"]
+        ["購入・下取り・ローン・高額イベント", "買替費用、下取り、ローン支払い、高額イベント回避を同じ年次表で確認する"],
+        ["高額イベント費用の扱い", "年合計に1回だけ含め、専用表では再掲として表示する"],
+        ["除外するもの", "新車購入費用、下取り想定額、最終売却額は年合計に含めない"]
       ])}
       ${renderRuleGroup("月額の式", [
         ["ローン月額換算", "ローン年額 / 12"],
@@ -839,7 +895,7 @@ function renderMaintenanceEventRows() {
         <td>${formatYen(amount)}</td>
         <td>${formatPercent(probability)}</td>
         <td>${formatYen(amount * probability)}</td>
-        <td>入る（該当車齢年）</td>
+        <td>入る（買替年・買替前年は0円）</td>
       </tr>
     `;
   }).join("");
@@ -871,6 +927,38 @@ function renderAnnualScenarioComparisonTable() {
       ${cells.join("")}
     `;
     annualScenarioComparisonTableBody.appendChild(row);
+  }
+}
+
+function renderPurchaseLoanCashflowTable() {
+  const selected = getSelectedResult();
+  document.querySelector("#purchaseLoanScenarioName").textContent = selected.scenario.name;
+  purchaseLoanCashflowTableBody.innerHTML = "";
+
+  for (const item of selected.rows) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${item.year}</td>
+      <td>${numberFormatter.format(item.driverAge)}歳</td>
+      <td>${escapeHtml(item.vehicleLabel)}</td>
+      <td>${item.newVehiclePurchaseCost > 0 ? "買替" : "-"}</td>
+      <td>${formatYen(item.newVehiclePurchaseCost)}</td>
+      <td>${formatYen(item.tradeInAmount)}</td>
+      <td>${formatYen(item.loanInitialDownPayment)}</td>
+      <td>${formatYen(item.currentLoan)}</td>
+      <td>${formatYen(item.replacementLoan)}</td>
+      <td>${formatYen(item.loan)}</td>
+      <td>${formatYen(item.loanMonthlyEquivalent)}</td>
+      <td>${escapeHtml(formatMajorEventNames(item.majorEvents))}</td>
+      <td>${formatYen(item.eventCost)}</td>
+      <td>${escapeHtml(item.skippedMajorEventReason || "-")}</td>
+      <td>${formatYen(item.loanFinalMonthly)}</td>
+      <td>${formatYen(item.residualValue)}</td>
+      <td>${formatLoanType(item.appliedLoanType)}</td>
+      <td>${formatAppliedLoanYears(item.appliedLoanYears)}</td>
+      <td>${formatYen(item.loanRelatedTotal)}</td>
+    `;
+    purchaseLoanCashflowTableBody.appendChild(row);
   }
 }
 
@@ -1028,6 +1116,57 @@ function buildAnnualScenarioComparisonCsv(results) {
       values.push(value ? Math.round(value.annualMonthly) : "-", value ? Math.round(value.total) : "-");
     }
     lines.push(values.map(csvCell).join(","));
+  }
+  return `\uFEFF${lines.join("\n")}`;
+}
+
+function buildPurchaseLoanCashflowCsv(result) {
+  const headers = [
+    "scenario",
+    "year",
+    "driverAge",
+    "vehicleLabel",
+    "replacementEvent",
+    "newVehiclePurchaseCost",
+    "tradeInAmount",
+    "loanInitialDownPayment",
+    "currentLoan",
+    "replacementLoan",
+    "totalLoan",
+    "loanMonthlyEquivalent",
+    "majorEvents",
+    "eventCost",
+    "skippedMajorEventReason",
+    "loanFinalMonthly",
+    "residualValue",
+    "appliedLoanType",
+    "appliedLoanYears",
+    "loanRelatedTotal"
+  ];
+  const lines = [headers.join(",")];
+  for (const item of result.rows) {
+    lines.push([
+      result.scenario.name,
+      item.year,
+      item.driverAge,
+      item.vehicleLabel,
+      item.newVehiclePurchaseCost > 0 ? "買替" : "",
+      Math.round(item.newVehiclePurchaseCost),
+      Math.round(item.tradeInAmount),
+      Math.round(item.loanInitialDownPayment),
+      Math.round(item.currentLoan),
+      Math.round(item.replacementLoan),
+      Math.round(item.loan),
+      Math.round(item.loanMonthlyEquivalent),
+      formatMajorEventNames(item.majorEvents),
+      Math.round(item.eventCost),
+      item.skippedMajorEventReason,
+      Math.round(item.loanFinalMonthly),
+      Math.round(item.residualValue),
+      item.appliedLoanType,
+      item.appliedLoanYears ?? "",
+      Math.round(item.loanRelatedTotal)
+    ].map(csvCell).join(","));
   }
   return `\uFEFF${lines.join("\n")}`;
 }
