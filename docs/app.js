@@ -49,54 +49,14 @@ const DEFAULT_ASSUMPTIONS = {
     years11to15: 70000,
     after16Years: 120000
   },
-  depreciation: {
-    currentVehicleRetentionByYearsFromStart: {
-      0: 1,
-      1: 0.82,
-      2: 0.6724,
-      3: 0.551368,
-      4: 0.452122,
-      5: 0.37074,
-      6: 0.304007,
-      7: 0.249285,
-      8: 0.204414,
-      9: 0.16762,
-      10: 0.137448,
-      11: 0.112707,
-      12: 0.09242,
-      13: 0.075784,
-      14: 0.062143,
-      15: 0.050957,
-      16: 0.041785,
-      17: 0.034264,
-      18: 0.028096,
-      19: 0.023039,
-      20: 0.018892
-    },
-    newVehicleRetentionByAge: {
-      1: 1,
-      2: 0.78,
-      3: 0.6084,
-      4: 0.474552,
-      5: 0.370151,
-      6: 0.288717,
-      7: 0.2252,
-      8: 0.175656,
-      9: 0.137011,
-      10: 0.106869,
-      11: 0.083358,
-      12: 0.065019,
-      13: 0.050715,
-      14: 0.039558,
-      15: 0.030855,
-      16: 0.03,
-      17: 0.03,
-      18: 0.03,
-      19: 0.03,
-      20: 0.03
-    },
-    minimumValueRate: 0.03
-  },
+  tradeInTable: [
+    { vehicleAge: 4, amount: 2900000 },
+    { vehicleAge: 6, amount: 2100000 },
+    { vehicleAge: 8, amount: 1500000 },
+    { vehicleAge: 10, amount: 1000000 },
+    { vehicleAge: 12, amount: 700000 },
+    { vehicleAge: 14, amount: 400000 }
+  ],
   scenarios: [
     { id: "before_inspection_5", name: "5年目車検前", replacementBeforeInspectionYear: 5 },
     { id: "before_inspection_7", name: "7年目車検前", replacementBeforeInspectionYear: 7 },
@@ -527,42 +487,46 @@ function getCurrentVehicleAgeAtIndex(assumptions, index) {
   return assumptions.startYear + index - assumptions.currentVehicle.purchaseYear;
 }
 
-function estimateCurrentVehicleValue(assumptions, yearsFromStart) {
-  const retention = lookupRetention(
-    assumptions.depreciation?.currentVehicleRetentionByYearsFromStart,
-    yearsFromStart,
-    0.82
-  );
-  return assumptions.currentVehicle.appraisal * retention;
+function estimateVehicleValueByAge(assumptions, vehicleAge) {
+  const table = normalizeTradeInTable(assumptions.tradeInTable);
+  if (table.length === 0) return 0;
+
+  const age = Number(vehicleAge);
+  if (!Number.isFinite(age)) return 0;
+  if (age <= table[0].vehicleAge) return table[0].amount;
+
+  for (let index = 1; index < table.length; index += 1) {
+    const previous = table[index - 1];
+    const current = table[index];
+    if (age === current.vehicleAge) return current.amount;
+    if (age < current.vehicleAge) {
+      const progress = (age - previous.vehicleAge) / (current.vehicleAge - previous.vehicleAge);
+      return previous.amount + (current.amount - previous.amount) * progress;
+    }
+  }
+
+  return table[table.length - 1].amount;
 }
 
-function estimateNewVehicleValue(assumptions, age) {
-  const minimumRate = assumptions.depreciation?.minimumValueRate ?? 0.03;
-  const retention = lookupRetention(
-    assumptions.depreciation?.newVehicleRetentionByAge,
-    age,
-    0.78,
-    1
-  );
-  const value = assumptions.newVehicle.estimateTotal * retention;
-  return Math.max(value, assumptions.newVehicle.estimateTotal * minimumRate);
-}
-
-function lookupRetention(table, key, fallbackAnnualRate, exponentOffset = 0) {
-  if (table && Number.isFinite(Number(table[key]))) return Number(table[key]);
-  return Math.pow(fallbackAnnualRate, Math.max(0, key - exponentOffset));
+function normalizeTradeInTable(table) {
+  return (Array.isArray(table) ? table : [])
+    .map((row) => ({
+      vehicleAge: Number(row.vehicleAge),
+      amount: Number(row.amount)
+    }))
+    .filter((row) => Number.isFinite(row.vehicleAge) && Number.isFinite(row.amount))
+    .sort((a, b) => a.vehicleAge - b.vehicleAge);
 }
 
 function estimateVehicleValueAtIndex(assumptions, index, hasNewVehicle, vehicleAge) {
-  if (hasNewVehicle) return estimateNewVehicleValue(assumptions, vehicleAge);
-  return estimateCurrentVehicleValue(assumptions, index);
+  return estimateVehicleValueByAge(assumptions, vehicleAge);
 }
 
 function estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge, replacementYears, scenarioLoan) {
   if (!hasNewVehicle || activeReplacementIndex === null) {
-    return estimateCurrentVehicleValue(assumptions, index) - estimateCurrentLoanBalance(assumptions, year);
+    return estimateVehicleValueByAge(assumptions, vehicleAge) - estimateCurrentLoanBalance(assumptions, year);
   }
-  return estimateNewVehicleValue(assumptions, vehicleAge) - estimateNewLoanBalancesAtIndex(replacementYears, index, scenarioLoan);
+  return estimateVehicleValueByAge(assumptions, vehicleAge) - estimateNewLoanBalancesAtIndex(replacementYears, index, scenarioLoan);
 }
 
 function estimateCurrentLoanBalance(assumptions, year) {
@@ -673,7 +637,7 @@ function renderCostRules() {
       ])}
       ${renderRuleGroup("新車・買替", [
         ["新車見積総額", formatYen(next.estimateTotal)],
-        ["下取り額", formatYen(next.tradeIn)],
+        ["今回下取り額", `${formatYen(next.tradeIn)}（参考入力）`],
         ["ローン種別", formatLoanType(loanType)],
         ["ローン総額", formatYen(next.loanTotal)],
         ["初回頭金", formatYen(next.loanInitialDownPayment)],
@@ -709,6 +673,25 @@ function renderCostRules() {
     </div>
 
     <section class="rule-block">
+      <h3>査定額テーブル</h3>
+      <p>下取り想定額、最終売却額、純資産の車両価値は車齢別の査定額テーブルで計算します。中間年は線形補間し、最終行以降は最終行の金額を下限値として扱います。</p>
+      <div class="table-wrap compact-table-wrap">
+        <table class="rules-table">
+          <thead>
+            <tr>
+              <th>車齢</th>
+              <th>査定額</th>
+              <th>計算での扱い</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTradeInTableRows()}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="rule-block">
       <h3>高額イベント</h3>
       <p>タイヤ、補機バッテリー等は該当車齢の年にイベント費用として年合計へ加算します。確率があるイベントは 金額 × 確率 を期待値として加算します。ただし買替年と買替前年は、買替で回避する前提として高額イベントを実施せず、イベント費用を0円にします。</p>
       <div class="table-wrap compact-table-wrap">
@@ -733,8 +716,9 @@ function renderCostRules() {
 
     <div class="rule-grid rule-grid-narrow">
       ${renderRuleGroup("資産価値・売却額", [
-        ["現車の価値", "現在査定額 × 現車残価率"],
-        ["新車の価値", "新車見積総額 × 新車残価率"],
+        ["車両価値", "車齢別査定額テーブル"],
+        ["中間年", "隣接する車齢の査定額を線形補間"],
+        ["14年以降", "40万円を下限値として固定"],
         ["最終売却額", "最終年の車両価値"],
         ["下取り想定額", "買替時点の車両推定価値"],
         ["年合計への扱い", "最終売却額は年合計には混ぜない"],
@@ -772,6 +756,10 @@ function calculateNewLoanTotalRepayment(newVehicle) {
 }
 
 function migrateAssumptions(assumptions) {
+  if (!Array.isArray(assumptions.tradeInTable) || assumptions.tradeInTable.length === 0) {
+    assumptions.tradeInTable = structuredClone(DEFAULT_ASSUMPTIONS.tradeInTable);
+  }
+
   const loan = assumptions.newVehicle;
   if (!loan) return;
   if (loan.loanInitialDownPayment === undefined) loan.loanInitialDownPayment = loan.loanInitial ?? 10000;
@@ -781,6 +769,21 @@ function migrateAssumptions(assumptions) {
     loan.loanTotal = loan.loanInitialDownPayment + loan.loanMonthly * getLoanMonths(loan.loanYears) + loan.loanFinalMonthly + loan.residualValue;
   }
   loan.loanType = getLoanType(loan);
+}
+
+function renderTradeInTableRows() {
+  const table = normalizeTradeInTable(state.assumptions.tradeInTable);
+  return table.map((row, index) => {
+    const isLast = index === table.length - 1;
+    const calculation = isLast ? "以降はこの金額を下限値にする" : "中間年の補間基準";
+    return `
+      <tr>
+        <td>${numberFormatter.format(row.vehicleAge)}年</td>
+        <td>${formatYen(row.amount)}</td>
+        <td>${calculation}</td>
+      </tr>
+    `;
+  }).join("");
 }
 
 function getLoanType(newVehicle) {
