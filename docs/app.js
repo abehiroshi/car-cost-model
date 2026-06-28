@@ -414,7 +414,7 @@ function buildReplacementLoanTerms(assumptions, replacementYears) {
     const previousLoan = loans[loans.length - 1] || null;
     const previousLoanBalanceRolledOver = previousLoan
       ? estimateLoanBalanceAtReplacement(previousLoan, replacementIndex)
-      : 0;
+      : estimateCurrentLoanBalanceAtReplacement(assumptions);
     if (previousLoan) previousLoan.rolloverAtIndex = replacementIndex;
     const standardLoanTotal = assumptions.newVehicle.estimateTotal - tradeInAmount + previousLoanBalanceRolledOver;
     const loanTotal = getLoanType(assumptions.newVehicle) === "standard"
@@ -434,6 +434,10 @@ function buildReplacementLoanTerms(assumptions, replacementYears) {
 
 function getReplacementLoanTerms(replacementLoans, replacementIndex) {
   return replacementLoans.find((loan) => loan.replacementIndex === replacementIndex) || null;
+}
+
+function estimateCurrentLoanBalanceAtReplacement(assumptions) {
+  return Math.max(0, Number(assumptions.currentVehicle?.loanBalance) || 0);
 }
 
 function calculateLoanCost(assumptions, year, index, activeReplacementIndex, replacementLoans) {
@@ -706,9 +710,9 @@ function renderCostRules() {
         ["入力総返済額", `${formatYen(newLoanTotalRepayment)}（参考）`],
         ["残価型ローン", "残価がある場合。最長5年"],
         ["通常ローン", "残価0円、最終月額0円、8年固定"],
-        ["買替時の残債", "前回ローンに残債がある場合は次回ローンへ組み込む"],
+        ["買替時の残債", "初回買替では現車ローン残債、2回目以降は前回ローン残債を次回ローンへ組み込む"],
         ["残債計算", "簡易モデルとして 残月数 × 月額"],
-        ["新ローン総額", "新車価格 - 下取り額 + 前回ローン残債"],
+        ["新ローン総額", "新車価格 - 下取り額 + 現車または前回ローン残債"],
         ["現金一括返済", "買替時の残債は現金返済せず、次回ローンへ繰り越す"],
         ["初回支払い", "初回頭金 + 通常月額の初回分"],
         ["最終支払い", "最終月額 + 残価"],
@@ -789,7 +793,7 @@ function renderCostRules() {
       ${renderRuleGroup("年合計の式", [
         ["年合計", "ローン + 年間維持費 + 修理期待値 + 車検 + 高額イベント費用"],
         ["購入・下取り・ローン・高額イベント", "買替費用、下取り、ローン支払い、高額イベント回避を同じ年次表で確認する"],
-        ["通常ローンの買替元本", "新車価格 - 下取り額 + 前回ローン残債"],
+        ["通常ローンの買替元本", "新車価格 - 下取り額 + 現車または前回ローン残債"],
         ["高額イベント費用の扱い", "年合計に1回だけ含め、専用表では再掲として表示する"],
         ["除外するもの", "新車購入費用、下取り想定額、最終売却額は年合計に含めない"]
       ])}
