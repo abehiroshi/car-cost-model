@@ -210,7 +210,8 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
   const rows = [];
   const horizonYears = getCycleHorizonYears(assumptions);
   const replacementYears = buildReplacementYears(scenario, horizonYears, assumptions);
-  const scenarioLoan = buildScenarioLoanTerms(scenario, assumptions.newVehicle);
+  const replacementLoans = buildReplacementLoanTerms(assumptions, replacementYears);
+  const scenarioLoan = replacementLoans[0] || buildScenarioLoanTerms(scenario, assumptions.newVehicle);
   let activeReplacementIndex = null;
   let cumulativeCost = 0;
 
@@ -227,12 +228,14 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
     if (replacementEvent) activeReplacementIndex = index;
 
     const hasNewVehicle = activeReplacementIndex !== null;
+    const activeReplacementLoan = hasNewVehicle ? getReplacementLoanTerms(replacementLoans, activeReplacementIndex) : null;
+    const replacementLoanEvent = replacementEvent ? getReplacementLoanTerms(replacementLoans, index) : null;
     const vehicleAge = hasNewVehicle ? index - activeReplacementIndex + 1 : getCurrentVehicleAgeAtIndex(assumptions, index);
     const vehicleLabel = hasNewVehicle ? `買替車 ${replacementYears.indexOf(activeReplacementIndex) + 1}` : "現車";
     const driverAge = assumptions.currentAge + index;
     const inflation = Math.pow(1 + safeRate(assumptions.inflationRate), index);
     const currentLoan = calculateCurrentLoanCost(assumptions, year, activeReplacementIndex);
-    const replacementLoan = calculateReplacementLoanTotal(index, activeReplacementIndex, replacementYears, scenarioLoan);
+    const replacementLoan = calculateReplacementLoanTotal(index, activeReplacementIndex, replacementLoans);
     const loan = currentLoan + replacementLoan;
     const running = calculateRunningCost(assumptions, vehicleAge, inflation);
     const repair = calculateRepairCost(assumptions, vehicleAge, inflation);
@@ -249,7 +252,7 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
       : "";
     const eventCost = sum(majorEvents.map((event) => event.expectedCost));
     const vehicleValue = estimateVehicleValueAtIndex(assumptions, index, hasNewVehicle, vehicleAge);
-    const netAsset = estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge, replacementYears, scenarioLoan);
+    const netAsset = estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge, replacementLoans);
     const finalSaleAmount = index === horizonYears - 1 ? vehicleValue : 0;
     const total = loan + running + repair + inspection + eventCost;
     const loanMonthlyEquivalent = loan / 12;
@@ -271,14 +274,16 @@ function calculateScenario(assumptions, maintenanceEvents, scenario) {
       loan,
       currentLoan,
       replacementLoan,
-      appliedLoanYears: hasNewVehicle ? scenarioLoan.loanYears : null,
-      appliedLoanType: hasNewVehicle ? scenarioLoan.loanType : "current",
+      appliedLoanYears: activeReplacementLoan ? activeReplacementLoan.loanYears : null,
+      appliedLoanType: activeReplacementLoan ? activeReplacementLoan.loanType : "current",
       loanMonthlyEquivalent,
       newVehiclePurchaseCost: replacementEvent ? assumptions.newVehicle.estimateTotal : 0,
       tradeInAmount,
-      loanInitialDownPayment: replacementEvent ? scenarioLoan.loanInitialDownPayment : 0,
-      loanFinalMonthly: replacementLoan > 0 && isReplacementLoanFinalYear(index, replacementYears, scenarioLoan) ? scenarioLoan.loanFinalMonthly : 0,
-      residualValue: replacementLoan > 0 && isReplacementLoanFinalYear(index, replacementYears, scenarioLoan) ? scenarioLoan.residualValue : 0,
+      previousLoanBalanceRolledOver: replacementLoanEvent ? replacementLoanEvent.previousLoanBalanceRolledOver : 0,
+      newLoanPrincipal: replacementLoanEvent ? replacementLoanEvent.loanTotal : 0,
+      loanInitialDownPayment: replacementLoanEvent ? replacementLoanEvent.loanInitialDownPayment : 0,
+      loanFinalMonthly: replacementLoan > 0 ? getReplacementLoanFinalMonthly(index, replacementLoans) : 0,
+      residualValue: replacementLoan > 0 ? getReplacementLoanResidualValue(index, replacementLoans) : 0,
       loanRelatedTotal: loan,
       running,
       repair,
@@ -368,20 +373,19 @@ function getLoanYearsForScenario(scenario, newVehicle) {
   const residualValue = Number(newVehicle.residualValue) || 0;
   if (residualValue > 0) return Math.min(configuredYears, 5);
 
-  const holdingYears = Number(scenario.replacementBeforeInspectionYear) - 1;
-  if (Number.isFinite(holdingYears) && holdingYears > 0) return Math.min(holdingYears, 8);
-
-  return configuredYears;
+  return 8;
 }
 
-function buildScenarioLoanTerms(scenario, newVehicle) {
+function buildScenarioLoanTerms(scenario, newVehicle, loanTotalOverride = null, previousLoanBalanceRolledOver = 0, replacementIndex = null, tradeInAmount = 0) {
   const loanYears = getLoanYearsForScenario(scenario, newVehicle);
   const loanMonths = getLoanMonths(loanYears);
-  const residualValue = clampNumber(newVehicle.residualValue, 0);
-  const loanType = residualValue > 0 ? "residual" : "standard";
+  const rawResidualValue = clampNumber(newVehicle.residualValue, 0);
+  const loanType = rawResidualValue > 0 ? "residual" : "standard";
+  const residualValue = loanType === "standard" ? 0 : rawResidualValue;
   const loanInitialDownPayment = Math.max(10000, clampNumber(newVehicle.loanInitialDownPayment, 10000));
-  const loanFinalMonthly = clampNumber(newVehicle.loanFinalMonthly, 0);
-  const loanTotal = Math.max(loanInitialDownPayment + loanFinalMonthly + residualValue, clampNumber(newVehicle.loanTotal, 0));
+  const loanFinalMonthly = loanType === "standard" ? 0 : clampNumber(newVehicle.loanFinalMonthly, 0);
+  const baseLoanTotal = loanTotalOverride === null ? newVehicle.loanTotal : loanTotalOverride;
+  const loanTotal = Math.max(loanInitialDownPayment + loanFinalMonthly + residualValue, clampNumber(baseLoanTotal, 0));
   const loanMonthly = Math.max(0, (loanTotal - loanInitialDownPayment - loanFinalMonthly - residualValue) / loanMonths);
   return {
     loanTotal,
@@ -391,13 +395,50 @@ function buildScenarioLoanTerms(scenario, newVehicle) {
     loanFinalMonthly,
     residualValue,
     loanYears,
-    loanMonths
+    loanMonths,
+    previousLoanBalanceRolledOver,
+    replacementIndex,
+    tradeInAmount
   };
 }
 
-function calculateLoanCost(assumptions, year, index, activeReplacementIndex, replacementYears, scenarioLoan) {
+function buildReplacementLoanTerms(assumptions, replacementYears) {
+  const loans = [];
+  for (const replacementIndex of replacementYears) {
+    const outgoingHasNewVehicle = loans.length > 0;
+    const previousReplacementIndex = outgoingHasNewVehicle ? loans[loans.length - 1].replacementIndex : null;
+    const outgoingVehicleAge = outgoingHasNewVehicle
+      ? replacementIndex - previousReplacementIndex + 1
+      : getCurrentVehicleAgeAtIndex(assumptions, replacementIndex);
+    const tradeInAmount = estimateVehicleValueAtIndex(assumptions, replacementIndex, outgoingHasNewVehicle, outgoingVehicleAge);
+    const previousLoan = loans[loans.length - 1] || null;
+    const previousLoanBalanceRolledOver = previousLoan
+      ? estimateLoanBalanceAtReplacement(previousLoan, replacementIndex)
+      : 0;
+    if (previousLoan) previousLoan.rolloverAtIndex = replacementIndex;
+    const standardLoanTotal = assumptions.newVehicle.estimateTotal - tradeInAmount + previousLoanBalanceRolledOver;
+    const loanTotal = getLoanType(assumptions.newVehicle) === "standard"
+      ? standardLoanTotal
+      : assumptions.newVehicle.loanTotal;
+    loans.push(buildScenarioLoanTerms(
+      { replacementBeforeInspectionYear: assumptions.newVehicle.loanYears + 1 },
+      assumptions.newVehicle,
+      loanTotal,
+      previousLoanBalanceRolledOver,
+      replacementIndex,
+      tradeInAmount
+    ));
+  }
+  return loans;
+}
+
+function getReplacementLoanTerms(replacementLoans, replacementIndex) {
+  return replacementLoans.find((loan) => loan.replacementIndex === replacementIndex) || null;
+}
+
+function calculateLoanCost(assumptions, year, index, activeReplacementIndex, replacementLoans) {
   return calculateCurrentLoanCost(assumptions, year, activeReplacementIndex)
-    + calculateReplacementLoanTotal(index, activeReplacementIndex, replacementYears, scenarioLoan);
+    + calculateReplacementLoanTotal(index, activeReplacementIndex, replacementLoans);
 }
 
 function calculateCurrentLoanCost(assumptions, year, activeReplacementIndex) {
@@ -412,26 +453,41 @@ function calculateCurrentLoanCost(assumptions, year, activeReplacementIndex) {
   return 0;
 }
 
-function calculateReplacementLoanTotal(index, activeReplacementIndex, replacementYears, scenarioLoan) {
+function calculateReplacementLoanTotal(index, activeReplacementIndex, replacementLoans) {
   if (activeReplacementIndex === null) return 0;
-  return sum(replacementYears.map((replacementIndex) => calculateReplacementLoanCost(index, replacementIndex, scenarioLoan)));
+  return sum(replacementLoans.map((loan) => calculateReplacementLoanCost(index, loan)));
 }
 
-function calculateReplacementLoanCost(index, replacementIndex, scenarioLoan) {
-  const loanYearIndex = index - replacementIndex;
+function calculateReplacementLoanCost(index, loan) {
+  const loanYearIndex = index - loan.replacementIndex;
   if (loanYearIndex < 0) return 0;
-  if (loanYearIndex >= scenarioLoan.loanYears) return 0;
+  if (loan.rolloverAtIndex !== undefined && index >= loan.rolloverAtIndex) return 0;
+  if (loanYearIndex >= loan.loanYears) return 0;
 
-  let cost = scenarioLoan.loanMonthly * 12;
-  if (loanYearIndex === 0) cost += scenarioLoan.loanInitialDownPayment;
-  if (loanYearIndex === scenarioLoan.loanYears - 1) {
-    cost += scenarioLoan.loanFinalMonthly + scenarioLoan.residualValue;
+  let cost = loan.loanMonthly * 12;
+  if (loanYearIndex === 0) cost += loan.loanInitialDownPayment;
+  if (loanYearIndex === loan.loanYears - 1) {
+    cost += loan.loanFinalMonthly + loan.residualValue;
   }
   return cost;
 }
 
-function isReplacementLoanFinalYear(index, replacementYears, scenarioLoan) {
-  return replacementYears.some((replacementIndex) => index - replacementIndex === scenarioLoan.loanYears - 1);
+function estimateLoanBalanceAtReplacement(loan, replacementIndex) {
+  const elapsedMonths = Math.max(0, replacementIndex - loan.replacementIndex) * 12;
+  const remainingMonths = Math.max(0, loan.loanMonths - elapsedMonths);
+  return Math.max(0, remainingMonths * loan.loanMonthly);
+}
+
+function getReplacementLoanFinalMonthly(index, replacementLoans) {
+  return sum(replacementLoans.map((loan) => {
+    return index - loan.replacementIndex === loan.loanYears - 1 ? loan.loanFinalMonthly : 0;
+  }));
+}
+
+function getReplacementLoanResidualValue(index, replacementLoans) {
+  return sum(replacementLoans.map((loan) => {
+    return index - loan.replacementIndex === loan.loanYears - 1 ? loan.residualValue : 0;
+  }));
 }
 
 function calculateRunningCost(assumptions, vehicleAge, inflation) {
@@ -522,11 +578,11 @@ function estimateVehicleValueAtIndex(assumptions, index, hasNewVehicle, vehicleA
   return estimateVehicleValueByAge(assumptions, vehicleAge);
 }
 
-function estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge, replacementYears, scenarioLoan) {
+function estimateNetAssetAtIndex(assumptions, year, index, activeReplacementIndex, hasNewVehicle, vehicleAge, replacementLoans) {
   if (!hasNewVehicle || activeReplacementIndex === null) {
     return estimateVehicleValueByAge(assumptions, vehicleAge) - estimateCurrentLoanBalance(assumptions, year);
   }
-  return estimateVehicleValueByAge(assumptions, vehicleAge) - estimateNewLoanBalancesAtIndex(replacementYears, index, scenarioLoan);
+  return estimateVehicleValueByAge(assumptions, vehicleAge) - estimateNewLoanBalancesAtIndex(replacementLoans, index);
 }
 
 function estimateCurrentLoanBalance(assumptions, year) {
@@ -543,11 +599,12 @@ function estimateNewLoanBalance(loan, yearInLoan) {
   return Math.max(0, loan.loanMonthly * Math.max(0, loanMonths - paidMonths) + loan.loanFinalMonthly + loan.residualValue);
 }
 
-function estimateNewLoanBalancesAtIndex(replacementYears, index, scenarioLoan) {
-  return sum(replacementYears.map((replacementIndex) => {
-    const yearInLoan = index - replacementIndex;
+function estimateNewLoanBalancesAtIndex(replacementLoans, index) {
+  return sum(replacementLoans.map((loan) => {
+    const yearInLoan = index - loan.replacementIndex;
     if (yearInLoan < 0) return 0;
-    return estimateNewLoanBalance(scenarioLoan, yearInLoan);
+    if (loan.rolloverAtIndex !== undefined && index >= loan.rolloverAtIndex) return 0;
+    return estimateNewLoanBalance(loan, yearInLoan);
   }));
 }
 
@@ -639,16 +696,20 @@ function renderCostRules() {
         ["新車見積総額", formatYen(next.estimateTotal)],
         ["今回下取り額", `${formatYen(next.tradeIn)}（参考入力）`],
         ["ローン種別", formatLoanType(loanType)],
-        ["ローン総額", formatYen(next.loanTotal)],
+        ["入力ローン総額", `${formatYen(next.loanTotal)}（参考）`],
         ["初回頭金", formatYen(next.loanInitialDownPayment)],
         ["月額", `${formatYen(next.loanMonthly)}（入力年数ベース）`],
         ["最終月額", formatYen(next.loanFinalMonthly)],
         ["残価", formatYen(next.residualValue)],
         ["入力ローン年数", `${numberFormatter.format(next.loanYears)}年`],
         ["支払回数", `${numberFormatter.format(loanMonths)}回`],
-        ["総返済額", formatYen(newLoanTotalRepayment)],
+        ["入力総返済額", `${formatYen(newLoanTotalRepayment)}（参考）`],
         ["残価型ローン", "残価がある場合。最長5年"],
-        ["通常ローン", "残価0円の場合。買替サイクル実保有年数と8年の短い方"],
+        ["通常ローン", "残価0円、最終月額0円、8年固定"],
+        ["買替時の残債", "前回ローンに残債がある場合は次回ローンへ組み込む"],
+        ["残債計算", "簡易モデルとして 残月数 × 月額"],
+        ["新ローン総額", "新車価格 - 下取り額 + 前回ローン残債"],
+        ["現金一括返済", "買替時の残債は現金返済せず、次回ローンへ繰り越す"],
         ["初回支払い", "初回頭金 + 通常月額の初回分"],
         ["最終支払い", "最終月額 + 残価"],
         ["連動計算", "初回頭金・月額・最終月額・残価は、総額を維持するように自動計算"],
@@ -728,6 +789,7 @@ function renderCostRules() {
       ${renderRuleGroup("年合計の式", [
         ["年合計", "ローン + 年間維持費 + 修理期待値 + 車検 + 高額イベント費用"],
         ["購入・下取り・ローン・高額イベント", "買替費用、下取り、ローン支払い、高額イベント回避を同じ年次表で確認する"],
+        ["通常ローンの買替元本", "新車価格 - 下取り額 + 前回ローン残債"],
         ["高額イベント費用の扱い", "年合計に1回だけ含め、専用表では再掲として表示する"],
         ["除外するもの", "新車購入費用、下取り想定額、最終売却額は年合計に含めない"]
       ])}
@@ -736,8 +798,8 @@ function renderCostRules() {
         ["買替年ローン", "初回頭金 + 月額 × 12"],
         ["通常年ローン", "月額 × 12"],
         ["ローン最終年", "月額 × 12 + 最終月額 + 残価"],
-        ["月額自動計算", "(ローン総額 - 初回頭金 - 最終月額 - 残価) / 支払回数"],
-        ["初回頭金自動計算", "ローン総額 - 月額 × 支払回数 - 最終月額 - 残価"],
+        ["通常ローン月額", "(新ローン総額 - 初回頭金) / 96回"],
+        ["参考入力の月額", "(入力ローン総額 - 初回頭金 - 最終月額 - 残価) / 支払回数"],
         ["その年の必要月額", "年合計 / 12"],
         ["累計平均月額", "累計支出 / 経過月数"],
         ["売却後平均月額", "(支出合計 - 最終売却額) / 利用月数"]
@@ -769,6 +831,11 @@ function migrateAssumptions(assumptions) {
     loan.loanTotal = loan.loanInitialDownPayment + loan.loanMonthly * getLoanMonths(loan.loanYears) + loan.loanFinalMonthly + loan.residualValue;
   }
   loan.loanType = getLoanType(loan);
+  if (loan.loanType === "standard") {
+    loan.loanYears = 8;
+    loan.loanFinalMonthly = 0;
+    loan.residualValue = 0;
+  }
 }
 
 function renderTradeInTableRows() {
@@ -803,6 +870,11 @@ function normalizeNewLoan(changedPath = "") {
   loan.residualValue = clampNumber(loan.residualValue, 0);
   loan.loanType = getLoanType(loan);
   loan.loanYears = Math.max(1, clampNumber(loan.loanYears, 1));
+  if (loan.loanType === "standard") {
+    loan.loanYears = 8;
+    loan.loanFinalMonthly = 0;
+    loan.residualValue = 0;
+  }
   const maxLoanYears = loan.loanType === "residual" ? 5 : 8;
   if (loan.loanYears > maxLoanYears) loan.loanYears = maxLoanYears;
   const loanMonths = getLoanMonths(loan.loanYears);
@@ -947,6 +1019,8 @@ function renderPurchaseLoanCashflowTable() {
       <td>${item.newVehiclePurchaseCost > 0 ? "買替" : "-"}</td>
       <td>${formatYen(item.newVehiclePurchaseCost)}</td>
       <td>${formatYen(item.tradeInAmount)}</td>
+      <td>${formatYen(item.previousLoanBalanceRolledOver)}</td>
+      <td>${formatYen(item.newLoanPrincipal)}</td>
       <td>${formatYen(item.loanInitialDownPayment)}</td>
       <td>${formatYen(item.currentLoan)}</td>
       <td>${formatYen(item.replacementLoan)}</td>
@@ -1132,6 +1206,8 @@ function buildPurchaseLoanCashflowCsv(result) {
     "replacementEvent",
     "newVehiclePurchaseCost",
     "tradeInAmount",
+    "previousLoanBalanceRolledOver",
+    "newLoanPrincipal",
     "loanInitialDownPayment",
     "currentLoan",
     "replacementLoan",
@@ -1156,6 +1232,8 @@ function buildPurchaseLoanCashflowCsv(result) {
       item.newVehiclePurchaseCost > 0 ? "買替" : "",
       Math.round(item.newVehiclePurchaseCost),
       Math.round(item.tradeInAmount),
+      Math.round(item.previousLoanBalanceRolledOver),
+      Math.round(item.newLoanPrincipal),
       Math.round(item.loanInitialDownPayment),
       Math.round(item.currentLoan),
       Math.round(item.replacementLoan),
