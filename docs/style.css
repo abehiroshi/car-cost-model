@@ -202,6 +202,20 @@ input:focus {
   border-color: var(--accent);
 }
 
+input[readonly] {
+  background: #eef3f4;
+  color: var(--muted);
+}
+
+.field-note {
+  grid-column: 1 / -1;
+  min-height: 1.4em;
+  margin: 0;
+  color: var(--warn);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);

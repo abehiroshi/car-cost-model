@@ -21,11 +21,15 @@
   "newVehicle": {
     "estimateTotal": 4276000,
     "tradeIn": 3014000,
-    "loanMonthly": 43047.333333333336,
+    "loanTotal": 4181840,
+    "loanType": "standard",
+    "loanInitialDownPayment": 10000,
+    "loanMonthly": 43456.666666666664,
+    "loanFinalMonthly": 0,
+    "residualValue": 0,
     "bonusPerPayment": 0,
     "bonusPaymentsPerYear": 0,
-    "loanYears": 5,
-    "loanFinal": 1599000,
+    "loanYears": 8,
     "interestRate": 0.061
   },
   "annualCosts": {
